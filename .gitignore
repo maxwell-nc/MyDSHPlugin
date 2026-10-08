@@ -1,0 +1,50 @@
+# ── 依赖 ──────────────────────────────────────────────────────────────
+# 组合包由 pnpm 装进 profile 的 node_modules，但本地调试/试验安装仍可能落到仓库里。
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+
+# ── 环境变量 ──────────────────────────────────────────────────────────
+# 各插件读 DSH_LAN_ACCESS_* / DSH_UI_DATA_DIR / DSH_GITBASH_* 等环境变量；
+# 真要本地改配置走 .env，不要提交。
+.env
+.env.*
+!.env.example
+
+# ── 日志与运行时产物 ──────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-error.log*
+logs/
+
+# ── 测试与覆盖率 ──────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── 打包产物 ──────────────────────────────────────────────────────────
+# 本仓库「源码即产物」，正常不产生 dist/；出现即为临时产物。
+dist/
+build/
+out/
+*.tgz
+
+# ── 编辑器 / IDE ──────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ── 操作系统 ──────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
