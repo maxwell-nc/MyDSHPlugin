@@ -1,0 +1,22 @@
+# dsh profile 补丁片段 —— 本组合包（bundle）自带的一层 patch。
+#
+# 0.2.0-rc.2 的 profile patch 由各 bundle 层叠加而成：本文件是 dsh-ui-retry
+# 这个组合包声明的层，按 profile package.json 里 `dsh.profile.bundles` 的顺序
+# 在各 bundle 层中应用。
+#
+# 本片段是一个 YAML 列表，不要写 YAML 文档头。
+#
+# 只插 host 半边：它负责注册 `GET /api/dsh-ui-retry.origin`（算「从哪儿切、
+# 原文是什么」）。真正干活的浏览器半边（lib/client.js）不需要在这里声明 ——
+# dsh 的 client-modules 会按包清单里的 `dsh.client` 字段自动发现它，
+# 见同目录 package.json。
+#
+# `name` 写的是裸包标识符 `dsh-ui-retry`（= 本组合包的包名），运行时按包名解析出
+# host 半边（package.json 的 `exports["."]`）。必须是不带 `./` 的裸包名：写相对
+# 路径时组合包声明的组件拿不到 DSH peer 兼容检查。
+#
+# `name` 只能写纯字符串：patch loader 拿到 `!!js` 表达式对象时 name.startsWith
+# 会直接崩（gitbash 插件踩过，见它的 README）。
+- insert:
+    - id: dsh-ui-retry
+      name: dsh-ui-retry

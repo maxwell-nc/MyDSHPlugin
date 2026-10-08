@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Reasoning Loop Guard",
+    "description": "Detects dead loops in the model's reasoning in real time (exact repeats, similar echoes, and degenerate repetition). On a hit it automatically re-runs the turn once on a new branch — the same mechanism retry uses, with the new branch opened for you and the looping turn left behind in the original session — and a second loop then interrupts the turn. The entry point is a shield button in the input footer, where you can review monitoring status and the hit log and turn auto-interrupt off at any time."
+  }
+}

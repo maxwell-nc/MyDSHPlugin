@@ -1,0 +1,17 @@
+# dsh profile 补丁片段 —— 把本插件 host 半边插进 profile 的插件树。
+#
+# 本片段是一个 YAML 列表；它是 dsh-loop-guard 这个组合包自带的一层 patch，
+# 按 profile package.json 里 `dsh.profile.bundles` 的顺序在各 bundle 层中应用。
+#
+# `insert` 不带 id 时新条目直接追加到根条目列表；`name` 写裸包标识符
+# `dsh-loop-guard`（= 本组合包的包名，运行时据此解析出 host 半边，即
+# package.json 的 `exports["."]`），不再用相对 profile 目录的路径 —— 必须是不带
+# `./` 的裸包名，写相对路径时组合包声明的组件拿不到 DSH peer 兼容检查。
+# `name` 只能写纯字符串（patch loader 拿到 `!!js` 表达式对象时 name.startsWith
+# 会直接崩，gitbash 插件踩过）。
+#
+# 浏览器那半边（lib/client.js）不需要在这里声明：dsh 的 client-modules 会按
+# 包清单里的 `dsh.client` 字段自动发现它 —— 见同目录 package.json。
+- insert:
+    - id: dsh-loop-guard
+      name: dsh-loop-guard

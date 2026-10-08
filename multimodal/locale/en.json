@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Model Multimodal Toggle",
+    "description": "Adds an \"Image\" checkbox to the left of the model picker in the input box, so you can turn image input on or off for the current custom model (the hand-written llm-pi-ai router). The gateway cannot probe multimodal capabilities in reverse, so you decide per model: checking the box declares input: [text, image], leaving it unchecked means text-only. The state is persisted per model and comes back automatically when you switch models."
+  }
+}

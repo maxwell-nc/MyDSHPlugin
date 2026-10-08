@@ -1,0 +1,34 @@
+{
+  "name": "dsh-loop-guard",
+  "version": "1.2.3",
+  "private": true,
+  "type": "module",
+  "description": "dsh 思考循环守卫插件（宿主半边：llm/stream 监听 + 循环检测 + 自动中断 + /api 状态接口；web 客户端半边：右下角悬浮面板）",
+  "exports": {
+    ".": "./loop_guard.mjs",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "loop_guard.mjs",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "dsh": "0.2.0-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  }
+}

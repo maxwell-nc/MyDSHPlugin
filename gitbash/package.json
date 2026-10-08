@@ -1,0 +1,29 @@
+{
+  "name": "dsh-git-bash",
+  "version": "2.3.0",
+  "description": "Windows 上用 Git Bash 取代 PowerShell（host 半边：接管 shell 执行器与持久终端，并把模型看到的 shell 工具改名为 bash）",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./gitbash-shell.mjs",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "gitbash-shell.mjs",
+    "cordis.patch.yml",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "dsh": "0.2.0-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  }
+}

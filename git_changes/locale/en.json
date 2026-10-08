@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Git Changes Viewer",
+    "description": "Binds the repository of the current conversation so you can browse local git changes (including untracked files) and the commit log (all branches, up to 200 entries). Local changes support viewing diffs, copying code, and rolling back a single change or a batch of them (with confirmation); the log is read-only, and you can inspect the files and contents each commit touched. The diff layout follows the review plugin: side by side on desktop, stacked top to bottom on mobile, both with line numbers."
+  }
+}

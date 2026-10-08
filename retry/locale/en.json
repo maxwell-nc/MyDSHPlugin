@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Message Edit / Retry",
+    "description": "Adds \"Edit\" and \"Retry\" next to the copy button on every user message. Edit resends your rewritten text, Retry resends the original; both fork a new branch from just before that turn and send the message from there — dsh session logs are append-only, so rewriting history in place would leave the UI and the model looking at different content, so this follows the built-in branch button instead. The original session is kept exactly as it was, and the parent/child link shows up in the sidebar."
+  }
+}

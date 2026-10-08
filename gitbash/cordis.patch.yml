@@ -1,0 +1,60 @@
+# dsh profile 补丁片段 —— 本组合包 `dsh-git-bash` 自己声明的 patch 层
+# （package.json 的 `dsh.bundle.patch`）。
+#
+# 它不再由外壳按 order 拼进 profile 的补丁：0.2.0-rc.2 里每个组合包各自贡献
+# **一个 bundle 层**，层与层按 profile `package.json` 的 `dsh.profile.bundles`
+# 数组顺序依次应用。
+#
+# 本片段是一个 YAML 列表；层与层之间不要互相引用，也不要写 YAML 文档头。
+#
+# 条目的 `name` 写的是**裸包标识符** `dsh-git-bash`，不是文件路径。运行时按包名
+# 解析组件；`.`/`/` 开头或含 `:` 的 name 会被 `bundleComponentManifests()` 直接
+# 跳过，于是本组合包声明的组件拿不到 DSH peer 兼容检查。
+#
+# ── 为什么是这几条 ──────────────────────────────────────────────────────────
+# 上游 @deepseek-ai/dsh-base 按平台二选一：
+#     bash-sandbox  disabled: process.platform === 'win32'
+#     pwsh-sandbox  disabled: process.platform !== 'win32'
+# 于是 win32 上拿到的是 PowerShell 那一套。官方约定要求**成对处理**，否则 profile
+# 加载不了（两个执行器会抢同一个 ctx.shell）。这里关掉两个上游执行器，换成
+# dsh-git-bash —— 它继承上游执行器，只把 argv[0] 换成 Git Bash 绝对路径
+# （Windows 的 PATH 上没有 bash.exe），默认走无沙箱分支。
+#
+# 模型看到 `bash` 还是 `pwsh`，由同一个包在运行时改写工具注册解决：上游
+# `dsh-tool-pwsh` 注册的 `pwsh` 工具被改名为 `bash` 并换成 Git Bash 的提示词，
+# 因此**不再需要 agent 预设那一层**。详见本目录的 README.md。
+#
+# 注意：`name` 字段**不吃 `!!js`**（loader 会拿到表达式对象然后 name.startsWith 崩掉），
+# 只能写纯字符串；`disabled` 和 `config` 里可以用。
+#
+# ── 平台门控（三条都要，这是本组合包唯一的手工门控）──────────────────────────
+# 旧形式的 manifest.json 里有 `"platforms": ["win32"]`，rc2 已经没有这个字段，
+# 门控只能搬进 patch，而且**三条都得门控**：
+#   · 前两条与上游 dsh-base 的写法完全一致（`=== 'win32'`）——win32 上关掉两个
+#     上游执行器，POSIX 上一个字节都不干预；
+#   · 第三条 `!== 'win32'` 保证插进来的 Git Bash 执行器只在 win32 上生效。
+# 只门控前两条会出事：在 POSIX 上装这个组合包会把 bash-sandbox 和 pwsh-sandbox
+# 同时关掉、又不插回任何执行器 —— profile 直接没有 shell。
+
+# 上游的 POSIX bash 执行器：win32 上本来就被平台门控关着，这里再用同一条平台
+# 表达式显式关掉是为了跨平台一致 —— 它在 POSIX 上会打开，而它会和下面的条目
+# 抢同一个 ctx.shell。
+- id: bash-sandbox
+  disabled: !!js process.platform === 'win32'
+  config:
+    timeoutMs: 60000
+
+# PowerShell 执行器：它是 win32 上默认启用的那个 ctx.shell 提供方，必须关掉，
+# 否则和下面的条目重复注册。
+- id: pwsh-sandbox
+  disabled: !!js process.platform === 'win32'
+
+- insert:
+    - id: bash-gitbash
+      name: dsh-git-bash
+      disabled: !!js process.platform !== 'win32'
+      config:
+        timeoutMs: 60000
+        # 接管的工具名（上游 Windows 上的 shell 工具）与改写后的名字
+        fromTool: pwsh
+        toolName: bash

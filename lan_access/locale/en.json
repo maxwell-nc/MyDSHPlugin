@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "LAN Access",
+    "description": "Adds an entry above the sidebar settings button that opens a QR code: scan it with a phone to open the web UI over the LAN. The bundle ships its own reverse proxy that only lets LAN origins through and guards it with a fixed access code (0.0.0.0:3081 → 127.0.0.1:3080 by default), while dsh itself keeps listening on loopback only. The link is made of the LAN IP, the port and the fixed access code, so it stays the same as long as the IP does; the panel can reset the access code to invalidate old links."
+  }
+}

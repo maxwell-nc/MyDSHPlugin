@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Git Bash executor",
+    "description": "On Windows, use Git Bash instead of PowerShell: takes over the shell executor and the persistent terminal (swapping both the PTY backend and the persistent shell tool to the bash dialect), and renames the shell tool the model sees from pwsh to bash. Covers the standard and the minimal mode. Plugin only, no agent preset required."
+  }
+}

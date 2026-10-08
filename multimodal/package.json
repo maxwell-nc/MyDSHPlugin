@@ -1,0 +1,34 @@
+{
+  "name": "dsh-multimodal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "给自定义模型逐个开关多模态（图片输入）",
+  "exports": {
+    ".": "./multimodal.mjs",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "multimodal.mjs",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "dsh": "0.2.0-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  }
+}

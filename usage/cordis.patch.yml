@@ -1,0 +1,23 @@
+# dsh profile 补丁片段 —— 本组合包（profile bundle）自带的 patch 层。
+#
+# 本片段是一个 YAML 列表，不要写 YAML 文档头。
+# 它不是被别人拼进去的片段，而是组合包自己声明的一层，按 profile `package.json`
+# 里 `dsh.profile.bundles` 的顺序在各 bundle 层中应用。
+#
+# 这条 patch 把本插件自己的 host 半边插进 profile 的插件树：
+#   * `insert` 不带 `id` 时，新条目直接追加到根条目列表（见 dsh-app-boot 的
+#     applyEntryPatches：`const { id, insert, name, ...overrides } = patch`，
+#     没有 id 就走 `data.push(...insert)`）。
+#   * `name` 是**裸包标识符** `dsh-usage`，不是文件路径：0.2.0-rc.2 起组合包
+#     由 pnpm 装进 profile 的 node_modules，Loader 按包名解析。写成相对路径（`./…`
+#     这种）会被 `bundleComponentManifests()` 直接跳过（`.`/`/` 开头或含 `:` 的 name
+#     一律不收），本组合包声明的组件就拿不到 DSH peer 兼容检查。
+#
+# 为什么 `name` 只能写纯字符串：patch loader 拿到 `!!js` 表达式对象时
+# name.startsWith 会直接崩（gitbash 插件踩过，见它的 README）。
+#
+# 浏览器那半边（lib/client.js）不需要在这里声明：dsh 的 client-modules 会
+# 按包清单里的 `dsh.client` 字段自动发现它 —— 见同目录 package.json。
+- insert:
+    - id: dsh-usage
+      name: dsh-usage
