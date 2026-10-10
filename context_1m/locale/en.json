@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "1M Context Toggle",
+    "description": "Adds a '1M' checkbox to the left of the model picker in the input box, declaring/removing a 1M-token contextWindow (1,000,000) for the current model. Checking writes contextWindow into llm-pi-ai config; unchecking deletes the field and restores the original context. State persists per model and follows model switching."
+  }
+}
