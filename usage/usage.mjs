@@ -102,11 +102,16 @@ const API_PATH = '/api/usage.data'
 /** 落盘去抖：连续事件合并成一次写，进程被强杀最多丢这么久的数据。 */
 const FLUSH_DELAY_MS = 800
 
-/** 数据文件里最多保留多少天（按日期键裁剪，天数是全局的，不分模型）。 */
-const KEEP_DAYS = 120
+/**
+ * 数据保留天数 —— 插件里唯一的天数配置，三处共用同一口径：
+ *   - 账本只保留最近 `KEEP_DAYS` 天，**更早的每天清理一次**（见 maintain()）
+ *   - `payload()` 的 `total` / `models` / `days` 也只取最近这 `KEEP_DAYS` 天
+ *   - 客户端柱状图横轴固定画 `KEEP_DAYS` 天（lib/client.js 里的 MAX_DAYS 与之对齐）
+ */
+const KEEP_DAYS = 15
 
-/** 客户端一次最多画多少天。 */
-const KEEP_DAYS_FOR_CLIENT = 30
+/** 每天清理一次的间隔（毫秒）。 */
+const DAY_MS = 24 * 60 * 60 * 1000
 
 /** 模型名读不出来时的占位，客户端按普通模型名处理。 */
 const UNKNOWN_MODEL = '未知模型'
@@ -223,14 +228,24 @@ function mtimeOf(path) {
   }
 }
 
-/** 按日期键裁掉过老的天，防止文件无限长。 */
+/**
+ * 按日期键裁掉过老的天（`< floorKey` 的删掉），保证账本最多 KEEP_DAYS 天。
+ *
+ * 不管天数到没到上限都会扫一遍：每天的定时维护（maintain()）也走这里，
+ * 把跨过 KEEP_DAYS 门槛的天清掉，文件就不会无限长。返回是否真的删了东西。
+ */
 function prune(state, today) {
-  const keys = Object.keys(state.days)
-  if (keys.length <= KEEP_DAYS) return
   const floor = new Date(`${today}T00:00:00`)
   floor.setDate(floor.getDate() - KEEP_DAYS)
   const floorKey = dayKey(floor)
-  for (const key of keys) if (key < floorKey) delete state.days[key]
+  let changed = false
+  for (const key of Object.keys(state.days)) {
+    if (key < floorKey) {
+      delete state.days[key]
+      changed = true
+    }
+  }
+  return changed
 }
 
 /* -------------------------------------------------------------------------- */
@@ -406,6 +421,20 @@ function createCollector(path) {
     }
   }
 
+  /**
+   * 每天清理一次：把超过 KEEP_DAYS 之前的天删掉并落盘。
+   *
+   * 这样 KEEP_DAYS 不光是「展示窗口」，也真的限制账本大小 —— 即便某天一个
+   * 事件都没有（不经过 fold 的 prune），定时任务也能兜住，不让文件无限长。
+   */
+  function maintain() {
+    if (prune(state, dayKey())) {
+      state.updatedAt = new Date().toISOString()
+      dirty = true
+    }
+    flush()
+  }
+
   function dispose() {
     if (timer !== undefined) {
       clearTimeout(timer)
@@ -455,7 +484,7 @@ function createCollector(path) {
   }
 
   /**
-   * 给浏览器用的视图：最近 KEEP_DAYS_FOR_CLIENT 天 + 全期模型排行。
+   * 给浏览器用的视图：最近 KEEP_DAYS 天 + 这段时间内的模型排行。
    * 颜色不上这里定 —— 由客户端按 models 顺序分配，柱子和图例自然一致。
    *
    * 每次调用都先 `reload()` 一次：界面上的「刷新」和 5 秒轮询都打到这儿，
@@ -464,7 +493,7 @@ function createCollector(path) {
   function payload(now) {
     reload()
     const keys = Object.keys(state.days).sort()
-    const recent = keys.slice(-KEEP_DAYS_FOR_CLIENT)
+    const recent = keys.slice(-KEEP_DAYS)
     const days = []
     const totals = new Map()
     for (const date of recent) {
@@ -494,6 +523,8 @@ function createCollector(path) {
       .map(([id, tokens]) => ({ id, tokens }))
     return {
       today: dayKey(now),
+      /** 展示/统计/留存共用的窗口天数（=KEEP_DAYS，客户端按它铺柱状图横轴）。 */
+      window: KEEP_DAYS,
       updatedAt: state.updatedAt,
       file: fileInfo(),
       total: models.reduce((sum, model) => sum + model.tokens, 0),
@@ -502,7 +533,7 @@ function createCollector(path) {
     }
   }
 
-  return { track, payload, flush, dispose }
+  return { track, payload, maintain, flush, dispose }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -540,7 +571,20 @@ export function apply(ctx) {
   const path = dataFilePath()
   const collector = createCollector(path)
 
-  ctx.effect(() => collector.dispose(), 'dsh-usage: flush data file')
+  // 每天清理一次账本（删掉 KEEP_DAYS 之前的天）。用 setInterval 相对今天跑，
+  // 插件常驻期间每天都触发；万一某天事件没来，还有 fold 里的 prune 兜底。
+  const maintenance = setInterval(() => {
+    try {
+      collector.maintain()
+    } catch (error) {
+      console.error(`${TAG} 每日清理失败：${String(error?.message ?? error)}`)
+    }
+  }, DAY_MS)
+
+  ctx.effect(() => {
+    clearInterval(maintenance)
+    collector.dispose()
+  }, 'dsh-usage: flush data file')
 
   // 传输层是可选的：只有 web profile 有 connection，缺了照样记账
   ctx.inject(['connection'], (scoped) => {

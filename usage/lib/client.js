@@ -93,7 +93,11 @@ window.__ModuleLoader__.load({
 			"#8fa8f2",
 			"#d3a0e8"
 		];
-		/** 柱状图固定画多少天：横轴永远是「今天往前 MAX_DAYS 天」，没数据的那天画占位。 */
+		/**
+		 * 柱状图横轴天数。和宿主侧 KEEP_DAYS 是同一份配置——宿主接口返回的
+		 * `window` 字段跟它对齐，客户端优先用它铺横轴（今天往前 N 天）；拿不到
+		 * 时才退回本地兜底值 15。改了宿主 KEEP_DAYS 这里 **必须同步改**。
+		 */
 		const MAX_DAYS = 15;
 		/** 打开面板时的轮询间隔。 */
 		const POLL_MS = 5000;
@@ -330,9 +334,12 @@ window.__ModuleLoader__.load({
 			const data = state.data;
 			const models = data?.models ?? [];
 			const total = data?.total ?? 0;
-			// 横轴固定 MAX_DAYS 天（今天往前数）：账本里根本没有的那天补成 0，画成占位短横
+			// 横轴天数跟宿主共一份配置：优先用接口返回的 window（=KEEP_DAYS），
+			// 拿不到才退回本地 MAX_DAYS。账本里根本没有的那天补成 0，画成占位短横。
+			const windowDays =
+				typeof data?.window === "number" && data.window >= 1 ? data.window : MAX_DAYS;
 			const recorded = new Map((data?.days ?? []).map((day) => [day.date, day]));
-			const days = recentKeys(data?.today || dateKey(new Date()), MAX_DAYS).map(
+			const days = recentKeys(data?.today || dateKey(new Date()), windowDays).map(
 				(date) => recorded.get(date) ?? { date, total: 0, models: {} }
 			);
 			const totalAmount = measure(total);

@@ -1,0 +1,12 @@
+# dsh profile 补丁片段 —— 把本插件 host 半边插进 profile 的插件树。
+#
+# 这是一个组合包层（见 package.json 的 dsh.bundle.patch），按 profile 的
+# package.json 里 dsh.profile.bundles 的顺序在各 bundle 层中应用。
+#
+# `name` 写裸包标识符（dsh-thinking-strength）而不是文件路径：组合包层据此
+# 定位包里的 host 半边，这个条目也因此进入 DSH 的 peer 兼容检查。
+#
+# 浏览器半边（lib/client.js）自动发现，见 package.json 的 dsh.client。
+- insert:
+    - id: dsh-thinking-strength
+      name: dsh-thinking-strength

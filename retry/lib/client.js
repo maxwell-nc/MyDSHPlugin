@@ -429,7 +429,15 @@ window.__ModuleLoader__.load({
 		/* 干活：读原文 → 切分支 → 发出去                                          */
 		/* --------------------------------------------------------------------- */
 
-		/** 当前正在看的会话 id。 */
+		/**
+		 * 当前正在看的会话 id。
+		 *
+		 * 不再读快照里的 `.current` 字段 —— dsh 新版里 session 列表快照已经没有它了
+		 * （形状是 `{ids, byId, phase, projectionsBySession}`），照旧读就会永远是
+		 * undefined → 界面报「当前没有打开会话」。现在改成扫 `byId`：谁的那一条
+		 * `retainedBy.mainView > 0`，谁就是主视图当前留着的那条 —— 和 dsh 自己的
+		 * 客户端代码看的是同一份数据，dsh 换版本也不会再对不上。
+		 */
 		function currentSessionId() {
 			const sessions = state.sessions;
 			if (sessions === null || sessions === undefined) return undefined;
@@ -439,8 +447,16 @@ window.__ModuleLoader__.load({
 			} catch {
 				return undefined;
 			}
-			const current = snapshot?.current;
-			return typeof current === "string" && current.length > 0 ? current : undefined;
+			const byId = snapshot?.byId;
+			if (byId === null || typeof byId !== "object") return undefined;
+			for (const id of Object.keys(byId)) {
+				const row = byId[id];
+				const retained = row?.retainedBy?.mainView;
+				if (typeof retained === "number" && retained > 0) {
+					if (typeof id === "string" && id.length > 0) return id;
+				}
+			}
+			return undefined;
 		}
 
 		/**

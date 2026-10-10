@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Thinking Strength",
+    "description": "Adds an A / H / M radio group to the left of the model picker in the input box, so you can switch the current model's thinking strength: A = auto (the model's own default), H = high, M = max. The strength is persisted per model and comes back automatically when you switch models; models without a saved value default to auto."
+  }
+}
