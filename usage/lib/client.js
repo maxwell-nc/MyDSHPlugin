@@ -37,11 +37,14 @@ window.__ModuleLoader__.load({
 			".dshu-sum{display:flex;align-items:baseline;gap:8px;margin-top:10px}" +
 			".dshu-sumNum{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}" +
 			".dshu-sumUnit{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a93a8)}" +
-			".dshu-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px}" +
-			".dshu-legendItem{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary,#5b6478);max-width:100%}" +
-			".dshu-legendName{max-width:150px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}" +
-			".dshu-swatch{flex:none;width:10px;height:10px;border-radius:3px}" +
-			".dshu-legendNum{color:var(--dsw-alias-label-tertiary,#8a93a8);font-variant-numeric:tabular-nums}" +
+			".dshu-legend{width:100%;margin-top:10px;border-collapse:collapse;table-layout:fixed;font-size:12px;cursor:default}" +
+			".dshu-legendRow{cursor:default}" +
+			".dshu-legendRow:hover .dshu-legendName{color:var(--dsw-alias-label-primary,#1b2130)}" +
+			".dshu-legendOther .dshu-legendName{color:var(--dsw-alias-label-primary,#1b2130);text-decoration:underline dotted;text-underline-offset:2px}" +
+			".dshu-legendCell{padding:2px 0;vertical-align:middle}" +
+			".dshu-legendName{display:block;padding-right:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary,#5b6478)}" +
+			".dshu-swatch{display:block;width:10px;height:10px;border-radius:3px}" +
+			".dshu-legendNum{color:var(--dsw-alias-label-tertiary,#8a93a8);font-variant-numeric:tabular-nums;text-align:right;padding-left:8px;white-space:nowrap}" +
 			".dshu-chart{display:flex;align-items:stretch;justify-content:center;gap:5px;height:168px;margin-top:14px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.10))}" +
 			".dshu-col{flex:1 1 0;min-width:0;max-width:20px;display:flex;flex-direction:column;height:100%}" +
 			".dshu-bar{flex:1;display:flex;flex-direction:column-reverse;min-height:0;border-radius:3px 3px 0 0;overflow:hidden}" +
@@ -119,14 +122,23 @@ window.__ModuleLoader__.load({
 			return { value: value / WAN, unit: "万" };
 		}
 
-		/** 数值本身的有效位：上千不留小数，小数则保两位。 */
+		/** 数值本身不保留小数：一律四舍五入成整数。 */
 		function formatValue(value) {
-			if (value >= 1e3) return value.toFixed(0);
-			if (value >= 100) return value.toFixed(1);
-			return value.toFixed(2);
+			return Math.round(value).toFixed(0);
 		}
 
-		/** 「1.23 亿」/「456.7 万」。 */
+		/** 总量单独保留两位小数：数值大了只看整数看不出变化。 */
+		function formatTotalValue(value) {
+			return Number(value).toFixed(2);
+		}
+
+		/** 一块「总量」的完整表示：带单位且保留两位小数，如「1.25 亿」。 */
+		function formatTotalAmount(tokens) {
+			const amount = measure(tokens);
+			return formatTotalValue(amount.value) + " " + amount.unit;
+		}
+
+		/** 整数用量 + 单位：如「1 亿」/「457 万」。 */
 		function formatAmount(tokens) {
 			const amount = measure(tokens);
 			return formatValue(amount.value) + " " + amount.unit;
@@ -135,7 +147,7 @@ window.__ModuleLoader__.load({
 		function formatShare(part, whole) {
 			if (!whole) return "0%";
 			const pct = (part / whole) * 100;
-			return (pct >= 10 ? pct.toFixed(1) : pct.toFixed(2)) + "%";
+			return Math.round(pct) + "%";
 		}
 
 		/** 数据文件大小（脚注里显示，让你知道账本多大）。 */
@@ -204,6 +216,53 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
+		 * 复用的悬浮弹窗：显示「日期 + 合计 + 当日前 N 个模型的对比清单」。
+		 *
+		 * 图表柱子和下方图例(items)都复用它，鼠标移过去就弹同一份完整对比
+		 * （图例展开后 rows 传入全部模型，含前 5 个在内）。
+		 *
+		 * @param tip - { x, y, date, total, rows }；rows 已是按用量降序、色已配好。
+		 */
+		function UsageTip({ tip }) {
+			if (tip === null) return null;
+			return react_dom.createPortal(
+				h(
+					"div",
+					{ className: "dshu-tip", style: { left: tip.x, top: tip.y } },
+					h(
+						"div",
+						{ className: "dshu-tipHead" },
+						tip.date,
+						tip.total > 0
+							? h("span", { className: "dshu-tipHeadTotal" }, "合计 " + formatTotalAmount(tip.total))
+							: null
+					),
+					tip.rows.length > 0
+						? h(
+								"div",
+								{ className: "dshu-tipList" },
+								tip.rows.map((row) =>
+									h(
+										react.Fragment,
+										{ key: row.id },
+										h("span", { className: "dshu-tipSwatch", style: { background: row.color } }),
+										h("span", { className: "dshu-tipName", title: row.id }, row.id),
+										h("span", { className: "dshu-tipNum" }, formatAmount(row.tokens)),
+										h("span", { className: "dshu-tipPct" }, formatShare(row.tokens, tip.total))
+									)
+								)
+							)
+						: h("div", { className: "dshu-tipDim" }, "没有用量")
+				),
+				// 气泡挂到 body：坐标来自 getBoundingClientRect（视口系），
+				// 而面板现在带 backdrop-filter —— 那会让面板成为 fixed 后代的
+				// **包含块**，气泡留在面板里就会被面板的 padding 原点偏移、还被
+				// overflow:auto 裁掉。挂到 body 才是原来的视口语义。
+				document.body
+			);
+		}
+
+		/**
 		 * 堆叠柱状图：横轴是固定的 MAX_DAYS 天（今天往前数），每天一根柱子，
 		 * 柱子按模型分色自下而上堆叠。鼠标移到某一段上弹「模型 + 颜色 + 占比 + 用量」。
 		 *
@@ -234,6 +293,7 @@ window.__ModuleLoader__.load({
 				const rows = models
 					.map((model) => ({ id: model.id, tokens: day.models[model.id]?.tokens ?? 0 }))
 					.filter((row) => row.tokens > 0)
+					.sort((left, right) => right.tokens - left.tokens)
 					.map((row) => ({ ...row, color: colors.get(row.id) ?? PALETTE[0] }));
 				setTip({
 					x: rect.left + rect.width / 2,
@@ -289,43 +349,7 @@ window.__ModuleLoader__.load({
 						)
 					)
 				),
-				tip === null
-					? null
-					: react_dom.createPortal(
-							h(
-								"div",
-								{ className: "dshu-tip", style: { left: tip.x, top: tip.y } },
-								h(
-									"div",
-									{ className: "dshu-tipHead" },
-									tip.date,
-									tip.total > 0
-										? h("span", { className: "dshu-tipHeadTotal" }, "合计 " + formatAmount(tip.total))
-										: null
-								),
-								tip.rows.length > 0
-									? h(
-											"div",
-											{ className: "dshu-tipList" },
-											tip.rows.map((row) =>
-												h(
-													react.Fragment,
-													{ key: row.id },
-													h("span", { className: "dshu-tipSwatch", style: { background: row.color } }),
-													h("span", { className: "dshu-tipName", title: row.id }, row.id),
-													h("span", { className: "dshu-tipNum" }, formatAmount(row.tokens)),
-													h("span", { className: "dshu-tipPct" }, formatShare(row.tokens, tip.total))
-												)
-											)
-										)
-									: h("div", { className: "dshu-tipDim" }, "没有用量")
-							),
-							// 气泡挂到 body：坐标来自 getBoundingClientRect（视口系），
-							// 而面板现在带 backdrop-filter —— 那会让面板成为 fixed 后代的
-							// **包含块**，气泡留在面板里就会被面板的 padding 原点偏移、还被
-							// overflow:auto 裁掉。挂到 body 才是原来的视口语义。
-							document.body
-						)
+				h(UsageTip, { tip })
 			);
 		}
 
@@ -345,6 +369,43 @@ window.__ModuleLoader__.load({
 			const totalAmount = measure(total);
 			const file = data?.file;
 			const colors = colorTable(models);
+			// 图例只显示前 TOP_N 个，第 TOP_N+1 起合并成「其他」；只有「其他」行
+			// 会触发悬浮窗，悬浮窗显示全部模型（前 5 名也逐行列出）。
+			const TOP_N = 5;
+			const [legendTip, setLegendTip] = react.useState(null);
+			const legendRowsFor = () =>
+				models
+					.map((model) => ({ id: model.id, tokens: model.tokens ?? 0 }))
+					.filter((row) => row.tokens > 0)
+					.sort((left, right) => right.tokens - left.tokens)
+					.map((row) => ({ ...row, color: colors.get(row.id) ?? PALETTE[0] }));
+
+			const showLegend = (event, rows) => {
+				const rect = event.currentTarget.getBoundingClientRect();
+				setLegendTip({
+					x: rect.left + rect.width / 2,
+					y: rect.top,
+					date: "全期用量",
+					total,
+					rows
+				});
+			};
+			const hideLegend = () => setLegendTip(null);
+			const allRows = legendRowsFor();
+			const top5 = allRows.slice(0, TOP_N);
+			const rest = allRows.slice(TOP_N);
+			const legendRows =
+				rest.length > 0
+					? top5.concat([
+							{
+								id: "其他",
+								tokens: rest.reduce((sum, row) => sum + row.tokens, 0),
+								color: "#9aa3b5"
+							}
+						])
+					: top5;
+			// 只有「其他」行是悬浮触发点：鼠标放上去弹全部模型的完整对比。
+			const isOtherRow = (row) => row.id === "其他";
 			return h(
 				"div",
 				{ className: "dshu-panel", style: anchor, role: "dialog", "aria-label": "Token 用量" },
@@ -361,7 +422,7 @@ window.__ModuleLoader__.load({
 				h(
 					"div",
 					{ className: "dshu-sum" },
-					h("span", { className: "dshu-sumNum" }, formatValue(totalAmount.value)),
+					h("span", { className: "dshu-sumNum" }, formatTotalValue(totalAmount.value)),
 					h("span", { className: "dshu-sumUnit" }, totalAmount.unit + " token 累计"),
 					h("span", { className: "dshu-sumUnit" }, models.length > 0 ? "· " + models.length + " 个模型" : "")
 				),
@@ -377,18 +438,36 @@ window.__ModuleLoader__.load({
 							react.Fragment,
 							null,
 							h(
-								"div",
-								{ className: "dshu-legend" },
-								models.map((model) =>
-									h(
-										"span",
-										{ className: "dshu-legendItem", key: model.id },
-										h("span", { className: "dshu-swatch", style: { background: colors.get(model.id) } }),
-										h("span", { className: "dshu-legendName", title: model.id }, model.id),
-										h("span", { className: "dshu-legendNum" }, formatAmount(model.tokens)),
-										h("span", { className: "dshu-legendNum" }, formatShare(model.tokens, total))
+								"table",
+								{
+									className: "dshu-legend",
+									onMouseLeave: hideLegend
+								},
+								h(
+									"tbody",
+									null,
+									legendRows.map((row) =>
+										h(
+											"tr",
+											{
+												className: "dshu-legendRow" + (isOtherRow(row) ? " dshu-legendOther" : ""),
+												key: row.id,
+												onMouseEnter: (event) => {
+													if (isOtherRow(row)) showLegend(event, allRows);
+												}
+											},
+											h(
+												"td",
+												{ className: "dshu-legendCell", style: { width: 18 } },
+												h("span", { className: "dshu-swatch", style: { background: row.color } })
+											),
+											h("td", { className: "dshu-legendCell" }, h("span", { className: "dshu-legendName", title: row.id }, row.id)),
+											h("td", { className: "dshu-legendCell dshu-legendNum", style: { width: 72 } }, formatAmount(row.tokens)),
+											h("td", { className: "dshu-legendCell dshu-legendNum", style: { width: 48 } }, formatShare(row.tokens, total))
+										)
 									)
-								)
+								),
+								h(UsageTip, { tip: legendTip })
 							),
 							h(UsageChart, { days, models, colors })
 						),
