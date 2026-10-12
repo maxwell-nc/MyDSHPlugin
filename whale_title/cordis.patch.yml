@@ -1,0 +1,15 @@
+# dsh profile 补丁片段 —— dsh-whale-title 组合包自带的 patch 层。
+#
+# 这条 patch 把本插件的 host 半边插进 profile 的插件树（同 dsh-usage 的套路）：
+#   * `insert` 不带 `id` 时新条目直接追加到根条目列表（applyEntryPatches 里
+#     没有 id 就 `data.push(...insert)`）。
+#   * `name` 必须是**裸包标识符** `dsh-whale-title`：组合包由 pnpm 装进 profile
+#     的 node_modules，Loader 按包名解析；写成路径（`./…`）会被
+#     bundleComponentManifests() 直接跳过，本组合包声明的组件就拿不到 DSH
+#     peer 兼容检查（gitbash 插件踩过这个坑）。
+#
+# 浏览器那半边（lib/client.js）不用在这里声明：dsh 的 client-modules 会按
+# 包清单里的 `dsh.client` 字段自动发现 `exports["./client"]`，并入插件图。
+- insert:
+    - id: dsh-whale-title
+      name: dsh-whale-title

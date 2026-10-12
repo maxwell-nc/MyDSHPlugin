@@ -1,0 +1,32 @@
+{
+  "name": "dsh-whale-title",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "dsh 任务运行时窗口标题鲸鱼动画插件（host 半边：Agent 状态采样 + SSE 帧流；Web 客户端半边：document.title 守卫与绘制）",
+  "exports": {
+    ".": "./whale-title.mjs",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "whale-title.mjs",
+    "lib/client.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "dsh": "0.2.0-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  }
+}
