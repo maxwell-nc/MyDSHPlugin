@@ -385,13 +385,17 @@ function createCore(ctx) {
     }
     const results = await queryService.readTitleSnapshots(ids)
     return results.map((result, index) => {
-      if (result?.status === 'fulfilled') {
-        return {
-          id: String((result.sessionId ?? result.value?.session?.id) ?? ids[index] ?? ''),
-          title: typeof result.value?.title === 'string' ? result.value.title : null
-        }
+      // 标题有三种形态：字符串（直接可用）、titleSnapshotFromState 冻结对象
+      // {title, messageSeqs, source, eventSeq, updatedAt}（官方 readTitleSnapshots
+      // 的 value.title 就是这种——只取其 .title 字符串）、或无标题事件时的缺失。
+      const raw = result?.value?.title
+      let text = null
+      if (typeof raw === 'string') text = raw
+      else if (raw !== null && typeof raw === 'object' && typeof raw.title === 'string') text = raw.title
+      return {
+        id: String((result.sessionId ?? result.value?.session?.id) ?? ids[index] ?? ''),
+        title: text !== null && text.length > 0 ? text : null
       }
-      return { id: String(result?.sessionId ?? ids[index] ?? ''), title: null }
     })
   }
 

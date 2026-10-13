@@ -95,7 +95,17 @@ const ctxStub = {
       return { list: () => [{ id: LIVE_ID }], get: (id) => (id === LIVE_ID ? { id } : undefined) }
     }
     if (key === 'sessionQuery') {
-      return { readTitleSnapshots: async (ids) => ids.map((id) => ({ sessionId: id, status: 'fulfilled', value: { session: { id }, title: 'T:' + id } })) }
+      // 官方 readTitleSnapshots 的 value.title 是 titleSnapshotFromState 冻结对象
+      // {title, messageSeqs, source, eventSeq, updatedAt}；测试一半给对象、一半给
+      // 纯字符串（旧形态），并留一个 undefined（无标题事件）
+      return {
+        readTitleSnapshots: async (ids) =>
+          ids.map((id, index) => {
+            if (id.endsWith('0000')) return { sessionId: id, status: 'fulfilled', value: { session: { id } } }
+            const title = index % 2 === 0 ? { title: 'T:' + id, messageSeqs: [1], source: { kind: 'llm' }, eventSeq: 2, updatedAt: 3 } : 'T:' + id
+            return { sessionId: id, status: 'fulfilled', value: { session: { id }, title } }
+          })
+      }
     }
     return undefined
   },
@@ -149,10 +159,14 @@ assert.equal(wsAlpha.sessionCount, 3, 'ws-alpha 应回到 3 个会话（含 live
 assert.equal(wsAlpha.dirStatus, 'ok')
 console.log('PASS overview：归属/标签/计数/目录状态 全部正确')
 
-/* 2. titles */
-const titles = await callRoute('/api/session-mgr.titles', { method: 'POST', body: { ids: ['session-aaaa', 'session-orphan'] } })
-assert.equal(titles.titles[0].title, 'T:session-aaaa')
-console.log('PASS titles：批量标题返回正确')
+/* 2. titles：快照对象 / 纯字符串 / 无标题事件 三种形态都要正确取到 */
+const titles = await callRoute('/api/session-mgr.titles', { method: 'POST', body: { ids: ['session-aaaa', 'session-orphan', 'session-ccccc', 'session-x0000'] } })
+assert.equal(titles.titles.length, 4)
+assert.equal(titles.titles[0].title, 'T:session-aaaa', '快照对象形态应取 .title 字符串')
+assert.equal(titles.titles[1].title, 'T:session-orphan', '纯字符串形态应直接采用')
+assert.equal(titles.titles[2].title, 'T:session-ccccc', '快照对象形态应取 .title 字符串')
+assert.equal(titles.titles[3].title, null, '无标题事件应返回 null')
+console.log('PASS titles：快照对象/字符串/无标题 三种形态全部正确')
 
 /* 3. 删除两个死的：aaaa（置顶）+ bbbb（归档）+ legacy-plain（未分组） */
 const deletion = await callRoute('/api/session-mgr.delete', {

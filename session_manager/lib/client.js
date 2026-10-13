@@ -36,11 +36,11 @@ window.__ModuleLoader__.load({
 			".dshm-wsInfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}" +
 			".dshm-wsTitle{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
 			".dshm-wsPath{font-family:ui-monospace,Consolas,'Courier New',monospace;font-size:11px;color:var(--dsw-alias-label-tertiary,#8a93a8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
-			".dshm-list{display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.12));border-radius:10px;max-height:52vh;min-height:120px;overflow-y:auto;overscroll-behavior:contain}" +
-			".dshm-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.08));background:var(--dsw-alias-bg-layer-1,transparent)}" +
+			".dshm-list{display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.12));border-radius:10px;max-height:52vh;min-height:120px;overflow-y:auto;overscroll-behavior:contain;background:var(--dsw-alias-bg-layer-2,#fff)}" +
+			".dshm-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.08));background:var(--dsw-alias-bg-layer-2,#fff)}" +
 			".dshm-row:last-child{border-bottom:none}" +
 			".dshm-row:hover{background:var(--dsw-alias-fill-l1,rgba(22,32,58,.04))}" +
-			".dshm-row-head{position:sticky;top:0;z-index:2;background:var(--dsw-alias-fill-l2,rgba(22,32,58,.06));font-size:12px;color:var(--dsw-alias-label-secondary,#5b6478);padding:6px 10px}" +
+			".dshm-row-head{position:sticky;top:0;z-index:2;background:var(--dsw-alias-bg-layer-2,#fff);font-size:12px;color:var(--dsw-alias-label-secondary,#5b6478);padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.12));box-shadow:0 6px 10px -8px rgba(16,24,40,.28)}" +
 			".dshm-check{flex:none;width:14px;height:14px;accent-color:var(--dsw-alias-state-business-primary,#3d7eff);cursor:pointer;margin:0}" +
 			".dshm-main{flex:1;min-width:0}" +
 			".dshm-line1{display:flex;align-items:center;gap:6px;min-width:0}" +
