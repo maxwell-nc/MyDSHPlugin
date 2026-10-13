@@ -123,7 +123,16 @@ window.__ModuleLoader__.load({
 
 		async function getJson(path) {
 			const response = await fetch(path, { cache: "no-store" });
-			if (!response.ok) throw new Error("HTTP " + response.status);
+			if (!response.ok) {
+				let detail = "";
+				try {
+					const payload = await response.json();
+					if (payload && typeof payload.error === "string") detail = payload.error;
+				} catch {
+					// 非 JSON 响应
+				}
+				throw new Error(detail ? detail + "（HTTP " + response.status + "）" : "HTTP " + response.status);
+			}
 			return await response.json();
 		}
 

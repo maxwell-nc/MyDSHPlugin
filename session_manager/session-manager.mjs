@@ -183,14 +183,16 @@ function projectionCacheFile(storageRoot, sessionId) {
 
 /**
  * DSH 的 storages 根（projection cache / workspace.json 的家）。
- * 三个候选都验证存在性；哪个有 session_projcache 用哪个，都不在返回 null。
+ * 候选按「跟会话根同源优先」排序：会话根的上一级就是 dsh home（sessions 和
+ * storages 是 ~/.dsh 下的兄弟目录），比环境变量更贴当前实例真实读写的地方；
+ * 每个候选都要验证 session_projcache 存在，哪个在用哪个，都不在返回 null。
  */
 async function resolveStorageRoot(persistence) {
   const candidates = []
-  const fromEnv = (process.env.DSH_HOME ?? '').trim()
-  if (fromEnv.length > 0) candidates.push(join(fromEnv, 'storages'))
   const root = persistenceRoot(persistence)
   if (root !== null) candidates.push(join(dirname(root), 'storages'))
+  const fromEnv = (process.env.DSH_HOME ?? '').trim()
+  if (fromEnv.length > 0) candidates.push(join(fromEnv, 'storages'))
   candidates.push(join(homedir(), '.dsh', 'storages'))
   for (const candidate of candidates) {
     try {
@@ -714,4 +716,10 @@ export function apply(ctx) {
   }
 }
 
-export default { name, apply }
+/**
+ * 注意 default 导出必须带上 inject：loader 是 `exports.default ?? exports`，
+ * 有 default 时具名导出（包括 inject）会被整个丢弃——whale_title 就是
+ * `export default { name, inject, apply }`。只写 `export const inject` 的
+ * 话服务打不开：`cannot get property "sessionPersistence" without inject`。
+ */
+export default { name, inject, apply }
