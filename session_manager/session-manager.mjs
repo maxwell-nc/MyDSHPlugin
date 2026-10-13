@@ -70,7 +70,7 @@
 
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
-import { mkdir, readdir, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, rm, stat, rmdir } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
 /** 稳定的 cordis 插件名（profile 插件树里是 dsh-session-manager 条目）。 */
@@ -443,12 +443,13 @@ function createCore(ctx) {
       await rm(dir, { recursive: true, force: true })
       const projectDir = dirname(dir)
       try {
-        // 空目录就删；**不带 recursive**——非空（还有别的会话或并发写入）会抛错，
-        // 恰好就是我们想要的行为：绝不递归删掉后来者放进来的东西
+        // 空目录就收走。用 rmdir 语义（Node 的 rm 不带 recursive 对目录一律
+        // EISDIR，等于永远删不了）：非空或被占用会抛 ENOTEMPTY/EBUSY，
+        // 恰好是我们要的 —— 绝不递归删掉后来者放进来的东西
         const rest = await readdir(projectDir)
-        if (rest.length === 0) await rm(projectDir, { force: true })
+        if (rest.length === 0) await rmdir(projectDir)
       } catch {
-        // 忙 / 权限异常：留一个空目录无害
+        // 非０条目 / 忙 / 权限异常：留一个空目录无害
       }
     }
     const cache = projectionCacheFile(storageRoot, header.id)

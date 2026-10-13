@@ -92,3 +92,15 @@ pnpm add D:\Project\dsplugin\session_manager
   不影响侧边栏与会话列表。
 * 删除所引用的会话时**不**清理全局 attachments 仓库（`~/.dsh/attachments`，
   按内容寻址共享，没法按会话归属安全回收）。
+
+## 测试
+
+```bash
+node test/host-logic.mjs     # host 半边端到端逻辑（桩服务 + 临时目录仿真布局，不碰真实 ~/.dsh）
+node test/client-render.mjs  # 浏览器半边渲染冒烟（极简 React 桩跑 loading/error/ready 分支）
+```
+
+两个测试都不依赖网络与真实数据。`host-logic.mjs` 曾抓出过一个真 bug：
+Node 的 `rm` 不带 `recursive` 对目录一律抛 EISDIR（不是 POSIX rmdir 语义），
+导致空工作区目录永远收不走，最终改用 `rmdir`（ENOTEMPTY 天然防竞态）。
+
