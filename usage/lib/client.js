@@ -122,26 +122,19 @@ window.__ModuleLoader__.load({
 			return { value: value / WAN, unit: "万" };
 		}
 
-		/** 数值本身不保留小数：一律四舍五入成整数。 */
-		function formatValue(value) {
-			return Math.round(value).toFixed(0);
+		/**
+		 * 数值格式随单位统一：亿保留两位小数（数值大了只看整数看不出变化），
+		 * 万直接取整。所有面板位置（总量、分项、角标、图例）都走这一个入口。
+		 */
+		function formatByUnit(value, unit) {
+			const digits = unit === "亿" ? 2 : 0;
+			return Number(value).toFixed(digits);
 		}
 
-		/** 总量单独保留两位小数：数值大了只看整数看不出变化。 */
-		function formatTotalValue(value) {
-			return Number(value).toFixed(2);
-		}
-
-		/** 一块「总量」的完整表示：带单位且保留两位小数，如「1.25 亿」。 */
-		function formatTotalAmount(tokens) {
-			const amount = measure(tokens);
-			return formatTotalValue(amount.value) + " " + amount.unit;
-		}
-
-		/** 整数用量 + 单位：如「1 亿」/「457 万」。 */
+		/** 数值 + 单位，全面板统一：如「1.25 亿」/「457 万」。 */
 		function formatAmount(tokens) {
 			const amount = measure(tokens);
-			return formatValue(amount.value) + " " + amount.unit;
+			return formatByUnit(amount.value, amount.unit) + " " + amount.unit;
 		}
 
 		function formatShare(part, whole) {
@@ -234,7 +227,7 @@ window.__ModuleLoader__.load({
 						{ className: "dshu-tipHead" },
 						tip.date,
 						tip.total > 0
-							? h("span", { className: "dshu-tipHeadTotal" }, "合计 " + formatTotalAmount(tip.total))
+							? h("span", { className: "dshu-tipHeadTotal" }, "合计 " + formatAmount(tip.total))
 							: null
 					),
 					tip.rows.length > 0
@@ -422,7 +415,7 @@ window.__ModuleLoader__.load({
 				h(
 					"div",
 					{ className: "dshu-sum" },
-					h("span", { className: "dshu-sumNum" }, formatTotalValue(totalAmount.value)),
+					h("span", { className: "dshu-sumNum" }, formatByUnit(totalAmount.value, totalAmount.unit)),
 					h("span", { className: "dshu-sumUnit" }, totalAmount.unit + " token 累计"),
 					h("span", { className: "dshu-sumUnit" }, models.length > 0 ? "· " + models.length + " 个模型" : "")
 				),
