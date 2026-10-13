@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Image Reader (multimodal relay)",
+    "description": "When the current model declares text-only input, automatically inject a read_image_details tool: the model passes an image (path/URL/data:URL/attachment digest) plus a question, the plugin relays it to a multimodal vision model configured in Settings, and returns the answer (e.g. button pixel coordinates) verbatim. Visibility follows the model's declared input modalities."
+  }
+}

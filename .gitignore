@@ -51,3 +51,5 @@ Thumbs.db:encryptable
 ehthumbs.db
 ehthumbs_vista.db
 Desktop.ini
+# ── 截图 / 测试图像（adb 截屏等，含隐私，不进库）───────────────────
+shots/

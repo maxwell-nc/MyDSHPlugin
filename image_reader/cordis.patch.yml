@@ -1,0 +1,18 @@
+# dsh profile 补丁片段 —— dsh-image-reader 组合包自带的 patch 层。
+#
+# 与 dsh-usage / dsh-session-manager 同一套路（踩过的坑见 usage/cordis.patch.yml）：
+#   * `insert` 不带 `id` 时新条目直接追加到根条目列表；
+#   * `name` 必须是**裸包标识符** `dsh-image-reader`：组合包由 pnpm 装进
+#     profile 的 node_modules，Loader 按包名解析；写成路径（`./…`）会被
+#     bundleComponentManifests() 直接跳过，本组合包声明的组件就拿不到
+#     DSH peer 兼容检查。
+#
+# 浏览器那半边（lib/client.js）不在这里声明：dsh 的 client-modules 会按
+# 包清单里的 `dsh.client` 字段自动发现 `exports["./client"]`，并入插件图。
+#
+# 需要持久化的配置（视觉模型、显示策略、maxTokens、超时）由设置面板写入
+# 这一条目自身（条目 id = dsh-image-reader，正好就是 settings 服务的 ns），
+# 全部字段标了 volatile，写入即热生效，不需要重启。
+- insert:
+    - id: dsh-image-reader
+      name: dsh-image-reader

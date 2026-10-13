@@ -1,0 +1,37 @@
+{
+  "name": "dsh-image-reader",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "给纯文本模型加一双借来的眼睛：当前模型按声明不支持图片输入时自动注入 read_image_details 工具，把「图片 + 问题」转发给设置面板指定的多模态模型，再把答案原样带回（host 半边：工具注册/可见性跟随/视觉桥接/设置接口；Web 客户端半边：设置 → 图像解读）",
+  "exports": {
+    ".": "./image-reader.mjs",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "image-reader.mjs",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "dsh": "0.2.0-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/schemastery": "~3.18.4",
+    "@deepseek-ai/dsh-tools": "~0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "~0.2.0-rc.2"
+  }
+}
