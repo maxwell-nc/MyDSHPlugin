@@ -61,6 +61,7 @@ for (const s of [...SEED, { id: LIVE_ID, cwd: 'D:\\Work\\alpha', createdAt: 9000
 
 /* ---------------- 桩服务 ---------------- */
 const calls = { unpin: [], unarchive: [], detach: [], wsDelete: [] }
+const emits = []
 const workspaces = new Map([
   ['ws-alpha', { id: 'ws-alpha', title: 'alpha', path: 'D:\\Work\\alpha', sessionIds: ['session-bbbb', 'session-aaaa', LIVE_ID], status: async () => 'ok', detachSession: async (id) => { calls.detach.push(['ws-alpha', id]) } }],
   ['ws-beta', { id: 'ws-beta', title: 'beta', path: 'D:\\Work\\beta', sessionIds: ['session-ccccc'], status: async () => 'ok', detachSession: async (id) => { calls.detach.push(['ws-beta', id]) } }]
@@ -93,8 +94,7 @@ const ctxStub = {
   get: (key) => {
     if (key === 'sessions') {
       return { list: () => [{ id: LIVE_ID }], get: (id) => (id === LIVE_ID ? { id } : undefined) }
-    }
-    if (key === 'sessionQuery') {
+    }    if (key === 'sessionQuery') {
       // 官方 readTitleSnapshots 的 value.title 是 titleSnapshotFromState 冻结对象
       // {title, messageSeqs, source, eventSeq, updatedAt}；测试一半给对象、一半给
       // 纯字符串（旧形态），并留一个 undefined（无标题事件）
@@ -110,6 +110,7 @@ const ctxStub = {
     return undefined
   },
   waterfall: async () => Promise.resolve([]),
+  emit: (name, ...args) => { emits.push([name, ...args]) },
   inject: (names, cb) => { assert.deepEqual(names, ['connection']); cb({ connection: { fetch: { register: (route) => routes.set(route.path, route) } } }) },
   effect: () => () => {}
 }
@@ -187,7 +188,10 @@ assert.equal(existsSync(sessionDir('session-aaaa', 'D:\\Work\\alpha')), false, '
 assert.equal(existsSync(join(cacheRoot, 'session-aaaa.json')), false, 'cache 应被删')
 assert.equal(existsSync(join(cacheRoot, LIVE_ID + '.json')), true, 'live 的 cache 不应被动')
 assert.equal(existsSync(join(sessionRoot, projKey('D:\\Work\\alpha'))), true, 'alpha 工作区目录还有 live 会话，不应删空目录')
-console.log('PASS delete：三处注册表摘除 + 文件删除 + live 拒删 全部正确')
+// 侧边栏同步：每个已删除的会话都应广播 api-session/removed
+const removedEvents = emits.filter(([name]) => name === 'api-session/removed').map(([, id]) => id)
+assert.deepEqual(removedEvents.sort(), ['legacy-plain', 'session-aaaa', 'session-bbbb'], '删除后应逐个广播 removed：' + JSON.stringify(removedEvents))
+console.log('PASS delete：三处注册表摘除 + 文件删除 + live 拒删 + removed 广播 全部正确')
 
 /* 4. 删掉孤儿 → 空项目目录应被清理 */
 const deletion2 = await callRoute('/api/session-mgr.delete', { method: 'POST', body: { ids: ['session-orphan'] } })
@@ -202,6 +206,7 @@ assert.equal(wsDel.deletedSessions, 1)
 assert.ok(calls.wsDelete.includes('ws-beta'), '注册表 delete 应被调用')
 assert.equal(existsSync(sessionDir('session-ccccc', 'D:\\Work\\beta')), false)
 assert.equal(workspaces.has('ws-beta'), false)
+assert.ok(emits.some(([name, id]) => name === 'api-session/removed' && id === 'session-ccccc'), '整删工作区时其会话也应广播 removed')
 console.log('PASS delete-workspace：会话 + 登记 全部删除')
 
 /* 6. live 工作区整体拒绝 */

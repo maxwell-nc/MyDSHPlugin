@@ -26,7 +26,14 @@ dsh 官方的会话管理只有「归档」：`workspaceRegistry.archiveSession(
 
 「使用中」的会话（本进程内存里有，或 `workspace/session-activity` waterfall
 报告有 turn/job/定时任务/子代理在跑）会被自动跳过——硬删进行中的日志会撕裂
-会话。删除会话/工作区后，侧边栏靠 workspace follow 流自动同步。
+会话。
+
+侧边栏同步分两条：工作区成员账目（sessionIds/置顶/归档）经注册表
+`domain/changed` → workspace follow 流自动推给客户端；会话**行**默认只认
+宿主的 `api-session/removed` 广播——宿主自己只为活会话的销毁发它，所以本
+插件删除成功后会替宿主逐个 `ctx.emit("api-session/removed", id)`
+（该事件在 api-remotes 转发白名单里），左侧列表即刻把僵尸行撤掉。
+
 
 ```
 session_manager/

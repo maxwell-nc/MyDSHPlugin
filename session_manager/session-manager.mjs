@@ -504,11 +504,28 @@ function createCore(ctx) {
         await detachFromRegistry(id)
         await deleteFiles(header, storageRoot)
         deleted.push(id)
+        notifySessionRemoved(id)
       } catch (error) {
         failed.push({ id, reason: String(error?.message ?? error) })
       }
     }
     return { deleted, failed }
+  }
+
+  /**
+   * 让左侧会话列表同步「会话没了」。
+   * 宿主自己只为活会话的销毁发 api-session/removed（session/disposed 时机），
+   * 冷会话被第三方（本插件）删除后没有任何广播，侧边栏会一直是僵尸行。
+   * 该事件在 api-remotes 的转发白名单里（mode:emit），任何插件在这里
+   * ctx.emit 都会被推给 web 客户端的 sessions store 删行。宿主万一没有
+   * 这个监听也无妨——emit 一个没人听的名字是 no-op。
+   */
+  function notifySessionRemoved(sessionId) {
+    try {
+      ctx.emit('api-session/removed', sessionId)
+    } catch (error) {
+      console.warn(`${TAG} 广播会话移除（${sessionId}）失败：${String(error?.message ?? error)}`)
+    }
   }
 
   /**
@@ -556,6 +573,7 @@ function createCore(ctx) {
       try {
         await detachFromRegistry(id)
         if (header !== undefined) await deleteFiles(header, storageRoot)
+        notifySessionRemoved(id)
       } catch (error) {
         failed += 1
         console.warn(`${TAG} 删除工作区 ${workspaceId} 下的 ${id} 失败：${String(error?.message ?? error)}`)
