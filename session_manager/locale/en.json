@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Manager",
+    "description": "Adds a Session Manager page to Settings: browse sessions per workspace (title, time, size), delete single or many sessions at once, bulk-clean sessions older than 30/15/7 days, delete an entire workspace, and open the session storage directory. Deletion is REAL: it removes the session log files (session.v4.jsonl.zstd etc.) plus registry records, unlike the built-in \"archive\"."
+  }
+}

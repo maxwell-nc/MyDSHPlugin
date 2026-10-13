@@ -1,0 +1,34 @@
+{
+  "name": "dsh-session-manager",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "dsh 会话批量管理插件（host 半边：会话清点/真正删除/工作区删除/打开目录接口；Web 客户端半边：设置 → 会话管理界面）",
+  "exports": {
+    ".": "./session-manager.mjs",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "session-manager.mjs",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "dsh": "0.2.0-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  }
+}

@@ -1,0 +1,14 @@
+# dsh profile 补丁片段 —— dsh-session-manager 组合包自带的 patch 层。
+#
+# 与 dsh-usage 同一套路（踩过的坑都在那儿写着，见 usage/cordis.patch.yml）：
+#   * `insert` 不带 `id` 时新条目直接追加到根条目列表；
+#   * `name` 必须是**裸包标识符** `dsh-session-manager`：组合包由 pnpm 装进
+#     profile 的 node_modules，Loader 按包名解析；写成路径（`./…`）会被
+#     bundleComponentManifests() 直接跳过，本组合包声明的组件就拿不到
+#     DSH peer 兼容检查。
+#
+# 浏览器那半边（lib/client.js）不在这里声明：dsh 的 client-modules 会按
+# 包清单里的 `dsh.client` 字段自动发现 `exports["./client"]`，并入插件图。
+- insert:
+    - id: dsh-session-manager
+      name: dsh-session-manager
