@@ -184,6 +184,12 @@ function parseUnifiedDiff(text) {
       continue
     }
     if (!cur) continue
+    // git diff 的元信息行，如「\ No newline at end of file」，不是真正的差异行，
+    // 必须跳过，否则会被误判成上下文行，污染「全是新增/全是删除」的判断。
+    if (line.startsWith('\\')) continue
+    // diff 文本末尾的换行会让 split('\n') 多出一个空串，那不是真正的差异行
+    //（真正的空上下文行是单个空格「 」），跳过它，避免污染 hunk 的行类型判断。
+    if (line === '') continue
     if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff --git') || line.startsWith('index ')) continue
     if (line.startsWith('+')) {
       cur.lines.push({ type: 'add', text: line.slice(1) })

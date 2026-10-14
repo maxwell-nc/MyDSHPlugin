@@ -15,14 +15,10 @@ window.__ModuleLoader__.load({
 			".dsgc-label{white-space:nowrap}" +
 			".dsgc-badge{flex:none;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--dsw-alias-state-business-primary,#3d7eff);color:#fff;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;justify-content:center}" +
 			".dsgc-overlay{position:fixed;inset:0;z-index:12000;display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1,#0f1115);color:var(--dsw-alias-label-primary,#e6e8ec);font-family:var(--dsw-font-family,ui-sans-serif,system-ui,-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif);font-size:13px}" +
-			// 顶部 bar 永远单行：标题和路径放不下就截断，「✕ 关闭」不会被换行/滚动挤掉。
-			// Windows 客户端顶部那一条是 -webkit-app-region:drag 的拖拽带（高
-			// --dsh-windows-titlebar-height，默认 40px），右上角还叠着系统窗口按钮
-			// （最小化/最大化/关闭，约 138px 宽）。浮层是 fixed 全屏，没人替它避让：
-			// 留在这条带子里按钮看得见也点不动（点击被窗口拖动吃掉），压在按钮下面也点不到。
-			// 所以上、右两侧都让开 —— bar 内容整体落到拖拽带下面。
-			".dsgc-bar{--dsgc-chrome-top:0px;--dsgc-chrome-right:0px;flex:none;display:flex;align-items:center;gap:8px;padding:10px 14px;padding-top:calc(10px + var(--dsgc-chrome-top));padding-right:calc(14px + var(--dsgc-chrome-right));border-bottom:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.08))}" +
-			"html[data-windows-titlebar] .dsgc-bar{--dsgc-chrome-top:var(--dsh-windows-titlebar-height,40px);--dsgc-chrome-right:138px}" +
+			// 顶部 bar 永远单行：标题和路径放不下就截断。
+			// 标题回归顶部原位（不再为 Windows 拖拽带整体下移）；刷新/关闭按钮已移到
+			// tabs 上方（tabs 在 bar 下方，天然避开顶部拖拽带和右上角系统窗口按钮）。
+			".dsgc-bar{flex:none;display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.08))}" +
 			".dsgc-title{flex:0 1 auto;min-width:0;font-size:14px;font-weight:600;margin-right:4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}" +
 			".dsgc-caption{color:var(--dsw-alias-label-tertiary,#8a93a8);font-size:12px;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}" +
 			".dsgc-spacer{flex:1}" +
@@ -35,7 +31,9 @@ window.__ModuleLoader__.load({
 			".dsgc-btn-close:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#e5484d) 82%,#000);color:#fff;border-color:transparent}" +
 			".dsgc-main{flex:1;display:flex;min-height:0}" +
 			".dsgc-side{flex:none;width:300px;min-width:220px;border-right:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.08));display:flex;flex-direction:column;min-height:0}" +
-			".dsgc-tabs{flex:none;display:flex;gap:4px;padding:8px}" +
+			".dsgc-tabbar{flex:none;display:flex;flex-direction:column;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.05))}" +
+			".dsgc-tabbtns{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px}" +
+			".dsgc-tabs{flex:none;display:flex;gap:4px;padding:0 8px 8px}" +
 			".dsgc-tab{flex:1;height:28px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a93a8);font:inherit;font-size:12px;cursor:pointer}" +
 			".dsgc-tab-on{background:var(--dsw-alias-fill-l2,rgba(255,255,255,.08));color:var(--dsw-alias-label-primary,#fff)}" +
 			".dsgc-list{flex:1;min-height:0;overflow:auto;padding:4px 6px}" +
@@ -100,7 +98,7 @@ window.__ModuleLoader__.load({
 				".dsgc-side .dsgc-item{width:auto}" +
 				".dsgc-side-log .dsgc-list{flex:1 1 50%}" +
 				".dsgc-logfiles{display:block;flex:1 1 50%;min-height:0;overflow:auto;border-top:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.05))}" +
-				// 手机上 bar 也不再是可滚动容器：右上角的「✕ 关闭」必须一直能看见、能点到
+				// 手机上 bar 也不再是可滚动容器（刷新/关闭按钮已移到 tabs 上方）
 				".dsgc-bar{max-height:none;overflow:visible}" +
 				// diff 窗口：底部弹出的浮层（本地 / 日志同一套）
 				// top 也要避开 Windows 客户端的拖拽带（--dsh-windows-titlebar-height），
@@ -422,20 +420,23 @@ window.__ModuleLoader__.load({
 			return h("div", { className: "dsgc-overlay", role: "dialog", "aria-label": "Git 变更查看" },
 				h("div", { className: "dsgc-bar" },
 					h("span", { className: "dsgc-title" }, "\u{1F5C2} Git 变更查看"),
-					h("span", { className: "dsgc-caption", title: repo }, repo || "未绑定仓库"),
-					h("span", { className: "dsgc-spacer" }),
-					h("button", { className: "dsgc-btn", onClick: () => { if (tab === "local") loadLocal(); else loadLog(); } }, "刷新"),
-					h("button", { className: "dsgc-btn dsgc-btn-close", onClick: onClose }, "\u2715 关闭")
+					h("span", { className: "dsgc-caption", title: repo }, repo || "未绑定仓库")
 				),
 				error ? h("div", { className: "dsgc-error" }, error) : null,
 				h("div", { className: "dsgc-main" },
 					// -------- 左：列表 --------
 					// dsgc-side-log：手机版把侧栏拆成「日志 50% + 改动文件 50%」，电脑版不用这条
 					h("div", { className: "dsgc-side" + (tab === "log" ? " dsgc-side-log" : "") },
-						h("div", { className: "dsgc-tabs" },
-							h("button", { className: "dsgc-tab" + (tab === "local" ? " dsgc-tab-on" : ""), onClick: () => switchTab("local") },
-								"本地变更" + (localFiles && localFiles.length > 0 ? " (" + localFiles.length + ")" : "")),
-							h("button", { className: "dsgc-tab" + (tab === "log" ? " dsgc-tab-on" : ""), onClick: () => switchTab("log") }, "提交日志")
+						h("div", { className: "dsgc-tabbar" },
+							h("div", { className: "dsgc-tabbtns" },
+								h("button", { className: "dsgc-btn", onClick: () => { if (tab === "local") loadLocal(); else loadLog(); } }, "刷新"),
+								h("button", { className: "dsgc-btn dsgc-btn-close", onClick: onClose }, "\u2715 关闭")
+							),
+							h("div", { className: "dsgc-tabs" },
+								h("button", { className: "dsgc-tab" + (tab === "local" ? " dsgc-tab-on" : ""), onClick: () => switchTab("local") },
+									"本地变更" + (localFiles && localFiles.length > 0 ? " (" + localFiles.length + ")" : "")),
+								h("button", { className: "dsgc-tab" + (tab === "log" ? " dsgc-tab-on" : ""), onClick: () => switchTab("log") }, "提交日志")
+							)
 						),
 						tab === "local"
 							? h(react.Fragment, null,
@@ -588,7 +589,14 @@ window.__ModuleLoader__.load({
 			const rows = [];
 			let oldNo = hunk.oldStart;
 			let newNo = hunk.newStart;
-			for (const l of hunk.lines) {
+			// 过滤掉不是真正差异行的内容，保证「全是新增/全是删除」的判断准确：
+			// 1. git diff 元信息行「\ No newline at end of file」（宿主侧已跳过，这里兜底）；
+			// 2. diff 文本末尾换行 split 出的空串（被误判成空上下文行）。
+			const lines = (hunk.lines || []).filter((l) => {
+				const t = String(l.text || "");
+				return t.trim() !== "No newline at end of file" && !(l.type === "ctx" && t === "");
+			});
+			for (const l of lines) {
 				if (l.type === "del") {
 					rows.push({ old: { no: oldNo++, text: l.text }, new: null, type: "del" });
 				} else if (l.type === "add") {
@@ -597,6 +605,10 @@ window.__ModuleLoader__.load({
 					rows.push({ old: { no: oldNo++, text: l.text }, new: { no: newNo++, text: l.text }, type: "ctx" });
 				}
 			}
+			// 整个 hunk 全是新增 → 没有旧版本，左侧不显示；
+			// 全是删除 → 没有新版本，右侧不显示。
+			const hasOld = rows.some((r) => r.old);
+			const hasNew = rows.some((r) => r.new);
 			const blank = (key) => h("div", { key, className: "dsgc-line dsgc-lblank" },
 				h("span", { className: "dsgc-lno" }, ""),
 				h("span", { className: "dsgc-lsign" }, ""),
@@ -604,14 +616,14 @@ window.__ModuleLoader__.load({
 			);
 			return h("div", { className: "dsgc-diff" },
 				h("div", { className: "dsgc-side2" },
-					h("div", { className: "dsgc-sidecol" },
+					hasOld ? h("div", { className: "dsgc-sidecol" },
 						h("div", { className: "dsgc-sidelabel" }, "旧版本"),
 						rows.map((r, i) => r.old ? h(Line, { key: i, no: r.old.no, text: r.old.text, type: r.type }) : blank(i))
-					),
-					h("div", { className: "dsgc-sidecol" },
+					) : null,
+					hasNew ? h("div", { className: "dsgc-sidecol" },
 						h("div", { className: "dsgc-sidelabel" }, "新版本"),
 						rows.map((r, i) => r.new ? h(Line, { key: i, no: r.new.no, text: r.new.text, type: r.type }) : blank(i))
-					)
+					) : null
 				)
 			);
 		}
