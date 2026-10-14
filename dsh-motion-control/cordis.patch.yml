@@ -1,0 +1,16 @@
+# dsh profile 补丁片段 —— dsh-motion-control 组合包自带的 patch 层。
+#
+# 与 dsh-usage / dsh-session-manager / dsh-whale-title 同一套路（坑都写在
+# usage/cordis.patch.yml 里）：
+#   * `insert` 不带 `id` 时新条目直接追加到根条目列表；
+#   * `name` 必须是**裸包标识符** `dsh-motion-control`：组合包由 pnpm 装进
+#     profile 的 node_modules，Loader 按包名解析。
+#
+# client 半边（lib/client.js）不在这里声明：dsh 的 client-modules 会按包清单
+# 里的 `dsh.client` 字段自动发现 `exports["./client"]`，但前提是**本包必须是
+# profile 插件树里的一个 loader 行**（client 发现是跟着 loader 的 entry 走的，
+# 见 packages/client/modules/src/index.ts 的 ctx.loader.entries() 扫描）——所以
+# 这里必须把 host 半边插进树里，client 才会被装上。
+- insert:
+    - id: dsh-motion-control
+      name: dsh-motion-control

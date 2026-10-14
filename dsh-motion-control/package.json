@@ -1,0 +1,32 @@
+{
+  "name": "dsh-motion-control",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "dsh 动画控制：设置面板三态开关（跟随系统 / 强制开 / 强制关），无视系统 prefers-reduced-motion 强制动画开或关（仅桌面版）。",
+  "exports": {
+    ".": "./motion-control.mjs",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "motion-control.mjs",
+    "lib/client.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "dsh": "0.2.0-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  }
+}
