@@ -8,8 +8,8 @@ dsh 组合包（bundle）：宿主半边（`context-1m.mjs`）+ Web 客户端半
 
 | 操作 | 结果 |
 | --- | --- |
-| 勾上  | 自动往 llm-pi-ai 配置里**写入**该模型的 `contextWindow: 1000000`（1M token） |
-| 取消  | 从 llm-pi-ai 配置里**删除**该模型的 `contextWindow`，回到原来的上下文 |
+| 勾上  | 自动往 llm-pi-ai 配置里**写入**该模型的 `contextWindow: 1000000`（1M token）**和** `maxTokens: 128000`（128K 最大输出，覆盖默认 32K） |
+| 取消  | 从 llm-pi-ai 配置里**删除**该模型的 `contextWindow` 与 `maxTokens`，回到原来的上下文与默认 32K 最大输出 |
 
 勾选状态 = 当前模型在 llm-pi-ai 配置里是否声明了 `contextWindow`（按模型各自独立）。
 
@@ -33,16 +33,16 @@ DSH 的上下文容量靠**模型目录声明**取值：llm-pi-ai 校验层只�
 - 定位 profile：优先 `DSH_PROFILE_DIR` → `DSH_HOME` + `DSH_PROFILE` → 兜底扫描
   `$DSH_HOME/profiles/*` 找装了本插件的目录。
 - 读写目标：`<profile>/cordis.patch.yml` 里 llm-pi-ai 条目的
-  `config.providers.<provider>.models[].contextWindow`。
+  `config.providers.<provider>.models[].contextWindow` 与 `.maxTokens`。
 - YAML 用 profile 共享 store 里的 `yaml`（`parseDocument`），改目标模型那一段时
   **保留其它注释与排版**；写文件走「临时文件 + rename」。
-- 勾上写入的默认值：`{ contextWindow: 1000000 }`。
+- 勾上写入的默认值：`{ contextWindow: 1000000, maxTokens: 128000 }`（1M 上下文 + 128K 最大输出）。
 
 **网页半边**（`lib/client.js`）是输入框里的勾选框，走两个 /api：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/dsh-context-1m.state?provider=&model=` | `{ok, provider, model, has, declared}` |
+| GET | `/api/dsh-context-1m.state?provider=&model=` | `{ok, provider, model, has, declared, declaredMaxTokens}` |
 | POST | `/api/dsh-context-1m.set` | `{provider, model, enabled}` 写入 / 删除 |
 
 切换模型时勾选框自动回读、状态按模型独立；出错（模型不在 llm-pi-ai 配置里等）会在

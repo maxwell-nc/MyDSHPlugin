@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "1M Context Toggle",
-    "description": "Adds a '1M' checkbox to the left of the model picker in the input box, declaring/removing a 1M-token contextWindow (1,000,000) for the current model. Checking writes contextWindow into llm-pi-ai config; unchecking deletes the field and restores the original context. State persists per model and follows model switching."
+    "description": "Adds a '1M' checkbox to the left of the model picker in the input box, declaring a 1M-token contextWindow (1,000,000) for the current model and setting max output to 128K (maxTokens = 128,000, overriding llm-pi-ai's default 32K). Checking writes contextWindow and maxTokens into llm-pi-ai config; unchecking deletes both fields and restores the original context and default 32K max output. State persists per model and follows model switching."
   }
 }

@@ -32,8 +32,8 @@ window.__ModuleLoader__.load({
 		 *
 		 * 勾选状态 = 当前模型在 llm-pi-ai 配置（profile 的 cordis.patch.yml）里
 		 * 是否声明了 `contextWindow`。勾上 → 自动往配置里写入 `contextWindow: 1000000`
-		 * （1M token 上下文窗口）；取消 → 删除该字段，模型回到原来的上下文
-		 * （适配器自带值，或 provider 的 `defaultContextWindow`）。
+		 * （1M token 上下文窗口）并同时写入 `maxTokens: 128000`（128K 最大输出，覆盖 llm-pi-ai 默认的 32K）；取消 → 删除这两个字段，模型回到原来的上下文与默认的 32K 最大输出
+		 * （适配器自带值，或 provider 的 `defaultContextWindow` / `defaultMaxTokens`）。
 		 * 上下文容量 / 自动压缩会按声明值计算。
 		 *
 		 * 当前模型从 `useProjection("modelSelection")` 读：`next` 是刚在模型
@@ -106,8 +106,8 @@ window.__ModuleLoader__.load({
 				error ||
 				current.model +
 					(has
-						? " · 已声明 contextWindow=1,000,000（1M 上下文）"
-						: " · 未声明 1M 上下文 · 勾选后写入 llm-pi-ai 配置");
+						? " · 已声明 contextWindow=1,000,000（1M 上下文）· maxTokens=128,000（128K 最大输出）"
+						: " · 未声明 1M 上下文 · 勾选后写入 llm-pi-ai 配置（1M 上下文 + 128K 最大输出）");
 
 			// 与思考/多模态插件一致：文字靠左、勾选框靠右，颜色/字号/对齐照搬
 			return h(

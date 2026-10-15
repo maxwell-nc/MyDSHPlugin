@@ -7,9 +7,11 @@
  *   - 勾选状态 = 当前模型在 llm-pi-ai 配置里是否声明了 `contextWindow`；
  *   - 勾上   → 往 profile 的 `cordis.patch.yml`（llm-pi-ai 条目里该模型的
  *             `providers.<provider>.models[]`）写入 `contextWindow: 1000000`
- *             （= 1M token 上下文窗口）；
- *   - 取消   → 从该模型条目里**删除** `contextWindow` 字段，让模型回到原来的
- *             上下文（适配器自带的值，或 provider 的 `defaultContextWindow`）。
+ *             （= 1M token 上下文窗口），并同时写入 `maxTokens: 128000`
+ *             （= 128K 最大输出，覆盖 llm-pi-ai 默认的 32K）；
+ *   - 取消   → 从该模型条目里**删除** `contextWindow` 与 `maxTokens` 字段，
+ *             让模型回到原来的上下文与默认的 32K 最大输出
+ *             （适配器自带的值，或 provider 的 `defaultContextWindow` / `defaultMaxTokens`）。
  *
  * 为什么改的是 patch 文件而不是请求参数：DSH 的上下文容量靠模型目录声明。
  * llm-pi-ai 校验层只接受模型声明过的 `contextWindow`（正整数，单位 token）；
@@ -42,6 +44,9 @@ const API_SET = '/api/dsh-context-1m.set'
 
 /** 勾上时写入的上下文窗口（token）：1M。 */
 const CONTEXT_1M = 1000000
+
+/** 勾上时一并写入的最大输出（token）：128000（十进制 128K，覆盖 llm-pi-ai 默认的 32K）。 */
+const MAX_TOKENS_128K = 128000
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'cache-control': 'no-store' } })
@@ -209,13 +214,14 @@ export function apply(ctx) {
         const located = entry >= 0 && provider && model ? modelEntryPath(doc, entry, provider, model) : { ok: false }
         const has = !!(located.ok && doc.getIn([...located.base, 'contextWindow']) !== undefined)
         const declared = has ? doc.getIn([...located.base, 'contextWindow']) : undefined
-        return json({ ok: true, provider, model, has, declared, profile: basename(profileDir), patch: file })
+        const declaredMaxTokens = located.ok ? doc.getIn([...located.base, 'maxTokens']) : undefined
+        return json({ ok: true, provider, model, has, declared, declaredMaxTokens, profile: basename(profileDir), patch: file })
       } catch (error) {
         return json({ ok: false, error: reasonOf(error) }, 500)
       }
     }
 
-    /** 写状态：勾上写入 contextWindow=1M，取消删除该字段（只动当前模型条目）。 */
+    /** 写状态：勾上写入 contextWindow=1M + maxTokens=128K，取消删除这两个字段（只动当前模型条目）。 */
     const handleSet = async (request) => {
       try {
         let body
@@ -243,11 +249,13 @@ export function apply(ctx) {
 
         if (enabled) {
           doc.setIn([...located.base, 'contextWindow'], CONTEXT_1M)
+          doc.setIn([...located.base, 'maxTokens'], MAX_TOKENS_128K)
         } else {
           doc.deleteIn([...located.base, 'contextWindow'])
+          doc.deleteIn([...located.base, 'maxTokens'])
         }
         writePatchAtomic(file, doc.toString({ lineWidth: 0 }))
-        console.error(`${TAG} ${enabled ? '已写入' : '已删除'} contextWindow：${provider} / ${model} -> ${file}`)
+        console.error(`${TAG} ${enabled ? '已写入' : '已删除'} contextWindow + maxTokens：${provider} / ${model} -> ${file}`)
         return json({ ok: true, provider, model, enabled, profile: basename(profileDir), patch: file })
       } catch (error) {
         return json({ ok: false, error: reasonOf(error) }, 500)
