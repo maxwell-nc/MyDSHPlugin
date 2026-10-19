@@ -5,9 +5,11 @@
 极简模式（minimal 预设）不走 `ctx.shell`，挂的是持久 PTY 终端栈，本插件
 把那套 PTY 的 shell 也换成 Git Bash（v2.1.0 起，见下文「极简模式」一节）。
 
-这个目录是一个 **dsh 0.2.0-rc.2 profile 组合包（bundle）**：用 pnpm 装进
+这个目录是一个 **dsh 0.2.x profile 组合包（bundle）**：用 pnpm 装进
 profile 的 `node_modules`，身份由 `package.json` 的 `dsh.bundle` 声明。
-目标运行时是 **0.2.0-rc.2**（`engines.dsh`，预发布版本按字面匹配，不是 `rc2`）。
+目标运行时是 **`>=0.2.0-rc.2 <0.3.0`**（`engines.dsh`）。DSH 用
+`semver.satisfies(runtime, range, { includePrerelease: true })` 校验，所以预发布版要写成
+区间：写死 `0.2.0-rc.2` 会在升到 0.2.1-rc.2 时被整体强制停用。
 
 ```
 gitbash/

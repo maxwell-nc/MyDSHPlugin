@@ -70,7 +70,8 @@ pnpm add D:/Project/dsplugin/thinking_strength
 装完**默认启用**，并出现在 profile `package.json` 的 `dsh.profile.bundles` 数组里。
 网页那半边靠 `package.json` 的 `dsh.client` 被 `dsh-client-modules` 自动发现。
 
-**版本要求**：dsh `0.2.0-rc.2`（`package.json` 的 `engines.dsh`）。
+**版本要求**：dsh `>=0.2.0-rc.2 <0.3.0`（`package.json` 的 `engines.dsh`；不满足时
+DSH 会把插件行强制停用）。
 
 ## 环境变量（可选）
 

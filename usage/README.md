@@ -62,7 +62,7 @@ pnpm add D:\Project\dsplugin\usage
 - **展示元数据**：组合包列表里的标题和简介来自 `locale/zh.json` / `locale/en.json` 的
   `meta.title` / `meta.description`；缺失的 locale 回退到 `package.json` 的
   `name` / `description`。本包没有图标资源，所以不设 `icon`。
-- **版本要求**：`engines.dsh` = `0.2.0-rc.2`。
+- **版本要求**：`engines.dsh` = `>=0.2.0-rc.2 <0.3.0`。
 
 ## 账本长什么样
 

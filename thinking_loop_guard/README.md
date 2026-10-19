@@ -86,8 +86,9 @@ pnpm add D:/Project/dsplugin/thinking_loop_guard
 **网页那半边不用写进补丁**：`package.json` 里的 `dsh.client` 会被
 `dsh-client-modules` 自动发现（patch 里只有宿主半边那一行）。
 
-**版本要求**：dsh `0.2.0-rc.2`（`package.json` 的 `engines.dsh`；这是作者声明，
-运行时不强拦，但请对上再用）。
+**版本要求**：dsh `>=0.2.0-rc.2 <0.3.0`（`package.json` 的 `engines.dsh`）。注意 DSH
+在组合 profile 时会按 `engines.dsh` 硬校验：不满足的条目会被强制 `disabled`，整个插件
+都不加载 —— 所以别把版本写死成某一个预发布版。
 
 ## 启用 / 停用
 

@@ -87,7 +87,7 @@ pnpm add D:\Project\dsplugin\session_manager
 `package.json` 的 `dsh.profile.bundles` 并应用本包 patch 层）。装完重载界面
 （桌面端切一下页面 / 重启 App），设置 → 会话管理 即可使用。
 
-- 版本要求：`engines.dsh = 0.2.0-rc.2`（对着桌面版 runtime 0.2.0-rc.2 核对）。
+- 版本要求：`engines.dsh = >=0.2.0-rc.2 <0.3.0`（不满足时 DSH 会把插件行强制停用）。
 - 调试横幅：`DSH_SESSION_MANAGER_QUIET=1` 关闭启动日志。
 
 ## 已知边界
