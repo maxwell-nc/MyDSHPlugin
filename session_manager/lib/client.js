@@ -320,6 +320,11 @@ window.__ModuleLoader__.load({
 				[scoped]
 			);
 			const deletable = react.useMemo(() => scoped.filter((row) => !row.live), [scoped]);
+			/** 已归档且未在使用中的会话（「一键删除已归档」的目标，随当前范围过滤）。 */
+			const archivedDeletable = react.useMemo(
+				() => deletable.filter((row) => row.archived),
+				[deletable]
+			);
 			const checkable = react.useMemo(() => visible.filter((row) => !row.live), [visible]);
 			const selectedRows = react.useMemo(
 				() => scoped.filter((row) => selected.has(row.id) && !row.live),
@@ -492,7 +497,18 @@ window.__ModuleLoader__.load({
 						},
 						days + " 天前（" + targets.length + "）"
 					);
-				})
+				}),
+				h(
+					"button",
+					{
+						type: "button",
+						className: "dshm-btn dshm-btn-danger",
+						disabled: busy || archivedDeletable.length === 0,
+						title: "永久删除本范围内所有「已归档」且未在使用中的会话",
+						onClick: () => confirmDeleteIds(archivedDeletable.map((row) => row.id), "已归档")
+					},
+					"已归档（" + archivedDeletable.length + "）"
+				)
 			);
 
 			const wsCard =
