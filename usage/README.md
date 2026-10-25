@@ -7,6 +7,11 @@
 图例（模型排行）只显示**前 5 名**，第 6 名起合并成「其他」一行；**只有「其他」
 一行**可悬浮 —— 弹窗显示**全部**模型的完整对比（含前 5 名，逐行分离）。
 
+除了 `session/event`（agent loop 的结算事件），还监听宿主事件 **`dsh-usage/report`**，
+收下配套插件上报的**辅助 LLM 请求**用量——主要是 dsh-image-reader 的视觉桥接
+（直接 `ctx.llm.stream()`、不经 agent loop，会话里没有结算事件）。这是两条独立的
+采集来源，都落到「当天 × 模型」同一笔账上（见 recordExternal()），缺哪个都不影响另一个。
+
 这个目录是一个 **dsh profile bundle（组合包）**，包名 `dsh-usage`，宿主侧条目 id
 也是 `dsh-usage`。0.2.0-rc.2 起组合包由 pnpm 装进 profile 的 `node_modules`，
 身份写在 `package.json` 的 `dsh.bundle.patch` 上 —— 没有单独的元数据文件。
@@ -119,6 +124,15 @@ pnpm add D:\Project\dsplugin\usage
 
 ## 几个刻意的设计（都是坑，别随手改）
 
+**辅助 LLM 请求（不经 agent loop）走 `dsh-usage/report` 事件上报。** 视觉桥接
+（dsh-image-reader 直接 `ctx.llm.stream()`）这类请求在会话里**没有**结算事件，常规
+读日志统计不到。配套插件在拿到 usage 后通过宿主事件 `dsh-usage/report` 上报，usage
+插件的 recordExternal() 把它归到「当天 × 上报的模型」名下。上报是尽力而为：没有 usage
+就不报，宿主没装 usage 插件时 `ctx.emit` 也没有副作用（无监听者即丢弃）。这份来源与
+`session/event` 是两条独立的线，各自去重 —— recordExternal 每次调用都是独立的一笔
+（现有调用方每次视觉请求只报一次），不再做 (turn, step) 覆盖；它不读会话，自然也不受
+会话水位表影响。
+
 **按 (turn, step) 做「覆盖」而不是「累加」。** 同一步里 `assistant/message` 可能带
 同一份 usage 反复结算（重试、流式收敛），直接累加会成倍虚高。做法是记住 last 样本、
 新增量 = 新值 − 旧值（上游 `tokenUsageProjection` 同款）；`llm/retry-started` 时清空
@@ -180,6 +194,12 @@ cookie 鉴权都由它处理，所以浏览器里直接同源 `fetch('/api/usage
 host 半边可以喂个假 ctx 直接驱动，**不用起 dsh、不花 token**：收下
 `connection.fetch.register` 给的路由和 `session/event` 的监听器，喂合成事件，
 再通过路由取一次 payload —— 采集口径、去重、回读同步都能这么验。
+
+外来上报（`dsh-usage/report` → recordExternal）有独立的假 ctx 自测：
+
+```bash
+node usage/test-record-external.mjs   # 收下上报监听器，喂视觉 usage，读账本断言
+```
 
 **真实事件形状**用 headless profile 跑一轮真对话验证（最省事，一条命令跑完即退）：
 

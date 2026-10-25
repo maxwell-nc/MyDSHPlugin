@@ -41,6 +41,11 @@ read_image_details(
   * `visibility = always` 可以强制常驻，`never` 可以隐藏（等于关功能），`auto` 是默认。
 * **配置热生效**：设置写的都是 volatile 字段，经 settings 服务落在本条目的 profile
   patch 里；工具执行与可见性判断每次现读，不依赖 apply 时的快照。
+* **视觉用量计入 dsh-usage**：每次视觉桥接拿到 usage 后，经宿主事件 `dsh-usage/report`
+  上报（`{provider, model, usage}`）。视觉请求是**直接 `ctx.llm.stream()`、不经 agent
+  loop**，会话里没有 assistant/message 结算事件，usage 插件常规读日志统计不到；主动
+  上报后它由 dsh-usage 的 recordExternal() 归到视觉模型名下。上报尽力而为：没有 usage
+  就不报，宿主没装 dsh-usage 时 `ctx.emit` 无副作用。
 
 ## 图片的四种传法
 

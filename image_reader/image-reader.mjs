@@ -21,7 +21,9 @@
  *      的**多模态模型**发起一次 `llm.stream()` 视觉请求（内容块
  *      {type:'image', attachment}，pi-ai adapter 自己会 readImageRequest →
  *      base64），把视觉模型的回答原样带回调用方（例如：直接返回
- *      「xx 按钮坐标 (x, y)」）；
+ *      「xx 按钮坐标 (x, y)」）。拿到 usage 后经宿主事件 `dsh-usage/report`
+ *      上报给 dsh-usage —— 视觉桥接是直接 llm.stream、不经 agent loop，会话里
+ *      没有结算事件，不主动上报 usage 插件就记不到这一笔 token；
  *   4. 设置面板（浏览器半边 lib/client.js 注册 settings.section，走本半边
  *      `/api/dsh-image-reader.catalog|config` 两条 connection 路由）：选视觉
  *      模型（只列声明支持图片输入的）、超时、maxTokens、工具显示策略；写入
@@ -701,6 +703,30 @@ export function apply(ctx, config) {
       })
       signal.throwIfAborted()
       console.error(`${TAG} 视觉桥接完成 ${vision.provider}/${vision.model} 图=${attachment.width}x${attachment.height} 耗时${Date.now() - started}ms${result.truncated === true ? '（截断）' : ''}`)
+
+      // 把这次视觉调用的 token 用量上报给 dsh-usage（宿主事件 `dsh-usage/report`）。
+      // 为什么必要：视觉桥接是**直接 `ctx.llm.stream()`**、不经 agent loop，会话里
+      // 不会出现 assistant/message 结算事件，usage 插件常规读会话日志读不到这一笔；
+      // 这里在拿到 usage 后主动上报，由 usage 插件的 recordExternal() 归到视觉模型名下。
+      // 上报是尽力而为：没有 usage（失败/被取消）、或者宿主没装 dsh-usage，都无害。
+      if (result.usage !== null && typeof result.usage === 'object'
+        && (Number.isFinite(result.usage.inputTokens) || Number.isFinite(result.usage.outputTokens))) {
+        try {
+          ctx.emit('dsh-usage/report', {
+            provider: vision.provider,
+            model: vision.model,
+            usage: {
+              inputTokens: Number.isFinite(result.usage.inputTokens) ? result.usage.inputTokens : 0,
+              outputTokens: Number.isFinite(result.usage.outputTokens) ? result.usage.outputTokens : 0,
+              cacheReadTokens: Number.isFinite(result.usage.cacheReadTokens) ? result.usage.cacheReadTokens : 0,
+              cacheWriteTokens: Number.isFinite(result.usage.cacheWriteTokens) ? result.usage.cacheWriteTokens : 0
+            }
+          })
+        } catch (error) {
+          // 上报失败不影响读图结果
+          console.error(`${TAG} 上报视觉用量失败：${String(error?.message ?? error)}`)
+        }
+      }
 
       return {
         provider: vision.provider,

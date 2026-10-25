@@ -12,6 +12,11 @@
  * 2. **展示**：注册一条鉴权过的 HTTP 读取接口 `/api/usage.data`，浏览器那半边
  *    （lib/client.js）在左下角设置按钮上方渲染入口 + 堆叠柱状图。
  *
+ * 除了读会话日志（agent loop 的结算事件），还监听宿主事件 `dsh-usage/report`，
+ * 收下配套插件上报的**辅助 LLM 请求**用量 —— 主要是 dsh-image-reader 的视觉桥接
+ * （直接 `ctx.llm.stream()`、不经 agent loop，会话里没有结算事件）。两份来源都归到
+ * 「当天 × 模型」同一笔账上，见 recordExternal()。
+ *
  * 两件事的依赖是**分开**的：采集只要 `session`（dsh-base 里就有），读取接口才需要
  * `connection`（只有 web profile 提供）。所以 `connection` 用 `ctx.inject` 按需绑定，
  * 而不是写在静态 `inject` 里 —— 否则在 headless / tui profile 里插件会一直挂着不激活，
@@ -191,6 +196,14 @@ function modelOf(event) {
   if (model.length > 0) return model
   const provider = typeof config.provider === 'string' ? config.provider.trim() : ''
   return provider.length > 0 ? `${provider} / 默认模型` : ''
+}
+
+/** 外来上报（recordExternal）里的模型名，与 modelOf 同一口径。 */
+function reportModelLabel(report) {
+  const model = typeof report?.model === 'string' ? report.model.trim() : ''
+  if (model.length > 0) return model
+  const provider = typeof report?.provider === 'string' ? report.provider.trim() : ''
+  return provider.length > 0 ? `${provider} / 默认模型` : UNKNOWN_MODEL
 }
 
 /* -------------------------------------------------------------------------- */
@@ -484,6 +497,34 @@ function createCollector(path) {
   }
 
   /**
+   * 收下外来的一份 token 用量（目前是 dsh-image-reader 的视觉桥接请求）。
+   *
+   * 为什么需要：usage 插件常规只读会话日志里的 `assistant/message` /
+   * `assistant/attempt`（都由 agent loop 结算）。但像视觉桥接这类**直接
+   * `ctx.llm.stream()`** 的辅助请求根本不经过 agent loop，会话里永远不会出现
+   * 结算事件 —— 它们的花费就漏记了。配套插件（image-reader）在拿到 usage 后，
+   * 通过宿主事件 `dsh-usage/report` 把这一笔上报上来，这里把它归到「当天 × 视觉
+   * 模型」名下记账。上报方不在也没关系（事件没人发就没这一笔），报错一律吞掉。
+   *
+   * @param report - `{ provider?, model?, usage }`；usage 需含 input/output 两桶。
+   * @returns 账本是否变化。
+   */
+  function recordExternal(report) {
+    const usage = report?.usage
+    if (!isUsage(usage)) return false
+    const model = reportModelLabel(report)
+    const buckets = bucketsOf(usage)
+    if (buckets.tokens <= 0) return false
+    const day = dayKey()
+    addToDay(day, model, buckets)
+    state.days[day].models[model].calls += 1
+    prune(state, day)
+    state.updatedAt = new Date().toISOString()
+    schedule()
+    return true
+  }
+
+  /**
    * 给浏览器用的视图：最近 KEEP_DAYS 天 + 这段时间内的模型排行。
    * 颜色不上这里定 —— 由客户端按 models 顺序分配，柱子和图例自然一致。
    *
@@ -533,7 +574,7 @@ function createCollector(path) {
     }
   }
 
-  return { track, payload, maintain, flush, dispose }
+  return { track, recordExternal, payload, maintain, flush, dispose }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -611,6 +652,16 @@ export function apply(ctx) {
       collector.track(session)
     } catch (error) {
       console.error(`${TAG} 采集事件失败：${String(error?.message ?? error)}`)
+    }
+  })
+
+  // 外来辅助请求的用量（如 dsh-image-reader 的视觉桥接）：不经 agent loop，
+  // 会话里没有结算事件，靠配套插件通过 dsh-usage/report 上报。
+  ctx.on('dsh-usage/report', (report) => {
+    try {
+      collector.recordExternal(report)
+    } catch (error) {
+      console.error(`${TAG} 收取外来用量失败：${String(error?.message ?? error)}`)
     }
   })
 
