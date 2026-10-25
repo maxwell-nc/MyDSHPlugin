@@ -124,6 +124,7 @@ const UNKNOWN_MODEL = '未知模型'
 /** 消耗来源标签（客户端列表也用同样的文案）。 */
 const SOURCE_CONVERSATION = '对话'
 const SOURCE_SUBAGENT = '子代理'
+const SOURCE_FORK = '分支'
 const SOURCE_EXTERNAL = '解析图片'
 
 /**
@@ -218,18 +219,24 @@ function reportModelLabel(report) {
 }
 
 /**
- * 一笔会话结算的来源标签。子代理会话在 header 上标 `origin === 'subagent'`、
- * `parentSession` 或 `delegationDepth`；都没有就当普通对话。
+ * 一笔会话结算的来源标签。
+ *
+ * dsh 的 SessionHeader 上只有 `origin?: 'subagent'` 一个来源标记，**没有**给「分支
+ * （fork）」单独做标记（fork 和子代理都带 `parentSession`，见 core/session 的
+ * `Session.fork` 与 subagent 的 child-agent）。区分靠 `origin`：
+ *   - `origin === 'subagent'` → 子代理（subagent 子会话）；
+ *   - 没标子代理、但有 `parentSession` / `delegationDepth` → 分支（复刻 fork）；
+ *   - 都没有 → 普通对话。
  */
 function sourceOf(session) {
   const header = session?.header
   if (header === null || typeof header !== 'object') return SOURCE_CONVERSATION
+  if (header.origin === 'subagent') return SOURCE_SUBAGENT
   if (
-    header.origin === 'subagent' ||
     (typeof header.parentSession === 'string' && header.parentSession.length > 0) ||
     (typeof header.delegationDepth === 'number' && header.delegationDepth > 0)
   ) {
-    return SOURCE_SUBAGENT
+    return SOURCE_FORK
   }
   return SOURCE_CONVERSATION
 }

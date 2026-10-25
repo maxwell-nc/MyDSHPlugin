@@ -103,7 +103,7 @@ window.__ModuleLoader__.load({
 		const YI = 1e8;
 		const YI_CUTOFF = 9999.5 * WAN;
 		/** 消耗来源的颜色徽标；未列出的来源（如「未知模型」之外的自定义来源）落到默认灰。 */
-		const SRC_COLORS = { "对话": "#6cb6f5", "子代理": "#a892f0", "解析图片": "#6ecf9e" };
+		const SRC_COLORS = { "对话": "#6cb6f5", "子代理": "#a892f0", "分支": "#f2949f", "解析图片": "#6ecf9e" };
 		const h = react.createElement;
 
 		function measure(tokens) {
@@ -451,8 +451,8 @@ window.__ModuleLoader__.load({
 									row.title.length > 0
 										? h("span", { className: "dshu-ltitle", title: row.title }, row.title)
 										: h("span", { className: "dshu-ltitle dshu-ltitleDim" }, "（无标题）"),
-									h("span", { className: "dshu-lmodel", title: row.models.join("、") }, row.models.join("、") || "—"),
 									h("span", { className: "dshu-lcount" }, row.count > 1 ? "×" + row.count : ""),
+									h("span", { className: "dshu-lmodel", title: row.models.join("、") }, row.models.join("、") || "—"),
 									h("span", { className: "dshu-ltime" }, formatStamp(row.time)),
 									h(
 										"span",

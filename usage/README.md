@@ -143,17 +143,20 @@ pnpm add D:\Project\dsplugin\usage
 笔 token 消耗来源，由宿主按「新到旧」排好放在 `payload.sources` 里；客户端固定一块
 高度（264px），**每页按高度决定行数**（行高 44px，向下取整 = 一行 6 条），超出一页
 出现「上一页 / 下一页 + 页码」，不撑爆面板。每行列：**类型 / 标题(如果有) / 模型 /
-时间 / 消耗**，用量「亿」保留 2 位小数、「万」显示整数（`formatAmount`）。
+时间 / 消耗**（合并行在标题后标「×N 次」），用量「亿」保留 2 位小数、「万」显示整数
+（`formatAmount`）。
 
-**来源标签由采集侧给出**：普通会话结算 =「对话」，子代理会话（`session.header`
-标了 `origin:'subagent'` / `parentSession` / `delegationDepth`）=「子代理」，
+**来源标签由采集侧给出**：普通会话结算 =「对话」；`origin:'subagent'` =「子代理」；
+**分支（fork）单独算「分支」** —— dsh 的 SessionHeader 只标 `origin?: 'subagent'`，
+没有给分支做独立标记（fork 和子代理都带 `parentSession`，区分靠 `origin`：有
+`parentSession`/`delegationDepth` 但 `origin` 不是 subagent 的就是复刻分支）；
 `dsh-usage/report` 外来上报 = 上报方自带的 `source`（dsh-image-reader 标
 「解析图片」），没带就兜底成「解析图片」。
 
 **同一个对话会合并成一行。** 明细里每笔都带 `sessionId`（会话 id）和 `title`（从
 `session/title` 事件捕获的会话标题，没到标题事件就留空）；客户端按 `sessionId`
 把同一会话的多笔并成一行：标题取非空者、模型列出用到的所有、时间取最近一次、
-消耗相加，行尾标「×N 次」。没有 `sessionId` 的外来上报（解析图片）各自成行，不并入
+消耗相加，标题后标「×N 次」。没有 `sessionId` 的外来上报（解析图片）各自成行，不并入
 任何对话。合并是**展示层**做的，账本仍按笔留存。
 
 明细是**按笔**留的独立列表（`state.sources`，与按天的聚合账 `days` 解耦），
