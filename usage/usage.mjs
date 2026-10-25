@@ -130,8 +130,12 @@ const SOURCE_EXTERNAL = '解析图片'
 /**
  * 明细列表里最多保留多少笔最近的消耗来源（客户端翻页展示，见 lib/client.js）。
  * 与 KEEP_DAYS（按天聚合的留存）互不影响：明细是**按笔**留，跟天不挂钩。
+ *
+ * **清理只在启动时做一次**（见 createCollector 的 trimSources）：运行期间只管往明细
+ * 头插，不再每次插入都裁剪/重排，避免高频调用下的不断清理开销。账本会在一段长运行里
+ * 略超上限，等下次重启时统一裁回 —— 单条约 120~210 B，5000 条约 1 MB 上下，可接受。
  */
-const MAX_SOURCES = 50
+const MAX_SOURCES = 5000
 
 /* -------------------------------------------------------------------------- */
 /* 纯函数：时间、桶、事件取值                                                    */
@@ -251,11 +255,15 @@ function readState(path) {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'))
     if (parsed !== null && typeof parsed === 'object' && parsed.days !== null && typeof parsed.days === 'object') {
+      const sources = Array.isArray(parsed.sources) ? parsed.sources : []
+      // 在执行期可能略超上限的长进程里，读回时 O(1) 裁回 MAX_SOURCES（含启动那一次），
+      // 保证内存/落盘都不越界；不随每次插入裁剪（见 recordSource）。
+      if (sources.length > MAX_SOURCES) sources.length = MAX_SOURCES
       return {
         version: 1,
         updatedAt: String(parsed.updatedAt ?? ''),
         days: parsed.days,
-        sources: Array.isArray(parsed.sources) ? parsed.sources : []
+        sources
       }
     }
   } catch {
@@ -340,15 +348,14 @@ function createCollector(path) {
   }
 
   /**
-   * 往明细列表头插一笔「消耗来源」，并裁到最多 MAX_SOURCES 笔。
-   * 明细是**按笔**留的独立列表（state.sources），跟按天的聚合账（days）互不影响；
-   * 客户端列表按「最近优先」展示，这里 unshift 到最前。
+   * 往明细列表头插一笔「消耗来源」。**不在这里裁剪**——裁剪统一在读账本
+   * （readState）时 O(1) 做，启动 + 每次真实重读都覆盖：新到旧 unshift 到头，
+   * 免去每次插入对 5000 条大数组的裁剪/重排开销。
    */
   function recordSource(entry) {
     if (entry === null || typeof entry !== 'object') return
     const list = (state.sources ??= [])
     list.unshift(entry)
-    if (list.length > MAX_SOURCES) list.length = MAX_SOURCES
   }
 
   /**
