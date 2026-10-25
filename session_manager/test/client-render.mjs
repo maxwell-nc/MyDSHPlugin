@@ -154,9 +154,11 @@ const sample = {
     { id: 'session-live-0000', cwd: 'D:\\Project\\dsplugin', createdAt: now - 9e8, updatedAt: now - 1e5, sizeBytes: 1200, dir: 'x', eventCount: 5, archived: false, pinned: true, live: true, subagent: false, parent: null, workspaceId: 'ws1' },
     { id: 'session-aa11', cwd: 'D:\\Project\\dsplugin', createdAt: now - 95e8, updatedAt: now - 40 * 864e5, sizeBytes: 900, dir: 'x', eventCount: 3, archived: true, pinned: false, live: false, subagent: false, parent: null, workspaceId: 'ws1' },
     { id: 'session-bb22', cwd: 'D:\\Project\\dsplugin', createdAt: now - 3e8, updatedAt: now - 20 * 864e5, sizeBytes: 800, dir: 'x', eventCount: 2, archived: false, pinned: false, live: false, subagent: false, parent: null, workspaceId: 'ws1' },
-    { id: 'legacy-cc33', cwd: null, createdAt: now - 2e8, updatedAt: now - 10 * 864e5, sizeBytes: 300, dir: 'x', eventCount: 1, archived: false, pinned: false, live: false, subagent: false, parent: null, workspaceId: null }
+    { id: 'legacy-cc33', cwd: null, createdAt: now - 2e8, updatedAt: now - 10 * 864e5, sizeBytes: 300, dir: 'x', eventCount: 1, archived: false, pinned: false, live: false, subagent: false, parent: null, workspaceId: null },
+    { id: 'fork-dd44', cwd: 'D:\\Project\\dsplugin', createdAt: now - 3e10, updatedAt: now - 1e5, sizeBytes: 500, dir: 'x', eventCount: 2, archived: false, pinned: false, live: false, subagent: false, parent: 'session-aa11', workspaceId: 'ws1' },
+    { id: 'sub-ee55', cwd: 'D:\\Project\\dsplugin', createdAt: now - 3e10, updatedAt: now - 1e5, sizeBytes: 400, dir: 'x', eventCount: 1, archived: false, pinned: false, live: false, subagent: true, parent: 'session-live-0000', workspaceId: 'ws1' }
   ],
-  archivedCount: 1, pinnedCount: 1, liveCount: 1, sessionCount: 4, totalBytes: 3200
+  archivedCount: 1, pinnedCount: 1, liveCount: 1, sessionCount: 6, totalBytes: 3200
 }
 globalThisRef.fetch = async (path, opts) => {
   if (String(path).includes('overview')) return { ok: true, json: async () => JSON.parse(JSON.stringify(sample)) }
@@ -169,7 +171,7 @@ globalThisRef.fetch = async (path, opts) => {
 frame = await runComponent({ fetchImpl: globalThisRef.fetch })
 const readyText = nodeToText(frame)
 assert.ok(readyText.includes('正在清点') === false, '加载完成后不应停留在 loading')
-;['dsplugin', '空区', 'aa11…', '「session-aa11」的标题', '使用中', '已归档', '置顶', '未分组', '一键清理', '30 天前（1）', '15 天前（2）', '7 天前（3）', '打开存储根目录', '全选（使用中的除外）'].forEach((needle) => {
+;['dsplugin', '空区', 'aa11…', '「session-aa11」的标题', '使用中', '已归档', '置顶', '分支', '子代理', '未分组', '一键清理', '30 天前（1）', '15 天前（2）', '7 天前（3）', '打开存储根目录', '全选（使用中的除外）'].forEach((needle) => {
   assert.ok(readyText.includes(needle), 'ready 分支缺少: ' + needle + '\n…' + readyText.slice(0, 500))
 })
 console.log('PASS ready 分支：工作区/行/标签/快捷清理计数 渲染完整')

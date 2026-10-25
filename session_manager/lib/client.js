@@ -51,6 +51,7 @@ window.__ModuleLoader__.load({
 			".dshm-tagArch{background:var(--dsw-alias-fill-l2,rgba(22,32,58,.08));color:var(--dsw-alias-label-caption,#98a0b3)}" +
 			".dshm-tagPin{background:color-mix(in srgb,var(--dsw-alias-state-business-primary,#3d7eff) 14%,transparent);color:var(--dsw-alias-state-business-primary,#3d7eff)}" +
 			".dshm-tagSub{background:color-mix(in srgb,#8a5cf6 14%,transparent);color:#8a5cf6}" +
+			".dshm-tagFork{background:color-mix(in srgb,#f2949f 20%,transparent);color:#e05a72}" +
 			".dshm-line2{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--dsw-alias-label-tertiary,#8a93a8);font-variant-numeric:tabular-nums}" +
 			".dshm-muted{font-family:ui-monospace,Consolas,'Courier New',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
 			".dshm-side{flex:none;text-align:right;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-tertiary,#8a93a8);font-size:11px;line-height:1.7;white-space:nowrap}" +
@@ -607,7 +608,8 @@ window.__ModuleLoader__.load({
 							row.live ? h("span", { className: "dshm-tag dshm-tagLive" }, "使用中") : null,
 							row.archived ? h("span", { className: "dshm-tag dshm-tagArch" }, "已归档") : null,
 							row.pinned ? h("span", { className: "dshm-tag dshm-tagPin" }, "置顶") : null,
-							row.subagent ? h("span", { className: "dshm-tag dshm-tagSub" }, "子代理") : null
+							row.subagent ? h("span", { className: "dshm-tag dshm-tagSub" }, "子代理") : null,
+							row.parent != null && !row.subagent ? h("span", { className: "dshm-tag dshm-tagFork" }, "分支") : null
 						),
 						h(
 							"div",
