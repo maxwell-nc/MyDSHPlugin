@@ -109,7 +109,9 @@ window.__ModuleLoader__.load({
 		function measure(tokens) {
 			const value = Number(tokens) || 0;
 			if (value >= YI_CUTOFF) return { value: value / YI, unit: "亿" };
-			return { value: value / WAN, unit: "万" };
+			if (value >= WAN) return { value: value / WAN, unit: "万" };
+			// 不够 1 万直接按原始 token 显示（unit 为空），避免出现「0 万 / 0.5 万」
+			return { value, unit: "" };
 		}
 
 		function formatByUnit(value, unit) {
@@ -119,7 +121,7 @@ window.__ModuleLoader__.load({
 
 		function formatAmount(tokens) {
 			const amount = measure(tokens);
-			return formatByUnit(amount.value, amount.unit) + " " + amount.unit;
+			return formatByUnit(amount.value, amount.unit) + (amount.unit ? " " + amount.unit : "");
 		}
 
 		function formatShare(part, whole) {
@@ -582,7 +584,7 @@ window.__ModuleLoader__.load({
 						"div",
 						{ className: "dshu-sum" },
 						h("span", { className: "dshu-sumNum" }, formatByUnit(totalAmount.value, totalAmount.unit)),
-						h("span", { className: "dshu-sumUnit" }, totalAmount.unit + " token 累计"),
+						h("span", { className: "dshu-sumUnit" }, (totalAmount.unit ? totalAmount.unit + " " : "") + "token 累计"),
 						h("span", { className: "dshu-sumUnit" }, models.length > 0 ? "· " + models.length + " 个模型" : "")
 					),
 					total <= 0
