@@ -84,9 +84,26 @@ pnpm add D:\Project\dsplugin\usage
                            "cacheRead": 0, "cacheWrite": 0, "calls": 3 }
       }
     }
-  }
+  },
+  "sources": [
+    { "time": "2026-09-19T02:20:06.312Z", "source": "解析图片",
+      "title": "", "sessionId": "",
+      "model": "glm-5.3-vision", "tokens": 140 },
+    { "time": "2026-09-19T02:19:01.000Z", "source": "对话",
+      "title": "帮我修个 bug", "sessionId": "conv-1",
+      "model": "deepseek-chat", "tokens": 2220 }
+  ]
 }
 ```
+
+`sources` 是最近 `MAX_SOURCES`（50）笔**消耗来源明细**，新到旧；每笔带时间
+（ISO）、来源（对话 / 子代理 / 解析图片…）、模型与总 token（`tokens`，口径同上），
+以及**会话 id（`sessionId`，客户端按它把同一会话合并成一行）和标题（`title`，从
+`session/title` 事件取，没有就空串）**；外来上报没有会话上下文，这两项为空串。
+它与 `days` 的留存互不影响：`days` 按天收敛且只留 KEEP_DAYS 天，
+`sources` 按笔收敛且只留最近 50 笔（删掉它们之间没有任何关联，见
+`recordSource()`）。旧版账本（1.0.x / 1.1.x）没有 `sources` 字段时不报错，
+读取时自动给空数组，界面列表从「还没有来源记录」开始积累。
 
 `tokens = input + cacheRead + cacheWrite + output`，四个桶互不重叠
 （reasoning 已含在 output 里）—— 和上游 `@deepseek-ai/dsh-token-meter` 的
@@ -121,6 +138,26 @@ pnpm add D:\Project\dsplugin\usage
 （样式上带虚线下划线提示）—— 移上去弹和柱状图同一个悬浮窗（`UsageTip` 复用），
 显示**全部**模型的完整对比：前 5 名和「其他」背后的每个模型都逐行列出，占比与
 图例同口径（窗口总量做分母）。前 5 名本身不弹窗，数字在行内即可读。
+
+**柱状图下方多一块「最近消耗来源」明细列表，独立翻页。** 显示最近 `MAX_SOURCES = 50`
+笔 token 消耗来源，由宿主按「新到旧」排好放在 `payload.sources` 里；客户端固定一块
+高度（264px），**每页按高度决定行数**（行高 44px，向下取整 = 一行 6 条），超出一页
+出现「上一页 / 下一页 + 页码」，不撑爆面板。每行列：**类型 / 标题(如果有) / 模型 /
+时间 / 消耗**，用量「亿」保留 2 位小数、「万」显示整数（`formatAmount`）。
+
+**来源标签由采集侧给出**：普通会话结算 =「对话」，子代理会话（`session.header`
+标了 `origin:'subagent'` / `parentSession` / `delegationDepth`）=「子代理」，
+`dsh-usage/report` 外来上报 = 上报方自带的 `source`（dsh-image-reader 标
+「解析图片」），没带就兜底成「解析图片」。
+
+**同一个对话会合并成一行。** 明细里每笔都带 `sessionId`（会话 id）和 `title`（从
+`session/title` 事件捕获的会话标题，没到标题事件就留空）；客户端按 `sessionId`
+把同一会话的多笔并成一行：标题取非空者、模型列出用到的所有、时间取最近一次、
+消耗相加，行尾标「×N 次」。没有 `sessionId` 的外来上报（解析图片）各自成行，不并入
+任何对话。合并是**展示层**做的，账本仍按笔留存。
+
+明细是**按笔**留的独立列表（`state.sources`，与按天的聚合账 `days` 解耦），
+跟 KEEP_DAYS 无关。
 
 ## 几个刻意的设计（都是坑，别随手改）
 

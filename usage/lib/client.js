@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
 		 * 面板（main 的 keyed 槽）呈现，所以这里不再有浮层/遮罩/触发按钮，只剩页面卡片。
 		 */
 		const css =
-			".dshu-page{box-sizing:border-box;width:100%;min-height:100%;display:flex;justify-content:center;padding:32px 26px}" +
+			".dshu-page{box-sizing:border-box;width:100%;height:100%;overflow-y:auto;display:flex;justify-content:center;padding:32px 26px}" +
 			".dshu-card{box-sizing:border-box;width:min(720px,100%);align-self:flex-start;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.12));border-radius:14px;padding:20px 22px;color:var(--dsw-alias-label-primary,#1b2130);font-family:'Segoe UI','Microsoft YaHei',system-ui,sans-serif;font-size:13px;line-height:1.6}" +
 			".dshu-head{display:flex;align-items:center;gap:10px}" +
 			".dshu-title{flex:1;font-size:16px;font-weight:600}" +
@@ -55,6 +55,22 @@ window.__ModuleLoader__.load({
 			".dshu-path{font-family:ui-monospace,Consolas,'Courier New',monospace;color:var(--dsw-alias-label-tertiary,#8a93a8);word-break:break-all}" +
 			".dshu-icon{display:block}" +
 			".dshu-badge{font-size:11px;line-height:1;color:var(--dsw-alias-label-tertiary,#8a93a8);font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none}" +
+			".dshu-list{margin-top:16px}" +
+			".dshu-listHead{display:flex;align-items:baseline;gap:8px;font-size:13px;font-weight:600}" +
+			".dshu-listCount{margin-left:auto;font-size:11px;font-weight:400;color:var(--dsw-alias-label-tertiary,#8a93a8)}" +
+			".dshu-listBody{height:264px;margin-top:8px;overflow:hidden;border:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.10));border-radius:10px}" +
+			".dshu-lrow{box-sizing:border-box;display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.08));font-size:12px}" +
+			".dshu-lrow:last-child{border-bottom:none}" +
+			".dshu-lrow:hover{background:var(--dsw-alias-bg-layer-2,rgba(22,32,58,.05))}" +
+			".dshu-lsrc{flex:none;padding:1px 8px;border-radius:6px;font-size:11px;line-height:1.6;color:#fff;white-space:nowrap}" +
+			".dshu-ltitle{min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--dsw-alias-label-primary,#1b2130)}" +
+			".dshu-ltitleDim{color:var(--dsw-alias-label-tertiary,#8a93a8)}" +
+			".dshu-lmodel{flex:none;max-width:150px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary,#5b6478)}" +
+			".dshu-lcount{flex:none;font-size:11px;color:var(--dsw-alias-label-tertiary,#8a93a8);font-variant-numeric:tabular-nums;white-space:nowrap}" +
+			".dshu-ltime{flex:none;color:var(--dsw-alias-label-tertiary,#8a93a8);font-variant-numeric:tabular-nums}" +
+			".dshu-ltok{flex:none;min-width:64px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}" +
+			".dshu-pag{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px}" +
+			".dshu-pagInfo{font-size:11px;color:var(--dsw-alias-label-tertiary,#8a93a8)}" +
 			".dshu-warn{color:#b45309}";
 		const tagId = "dsh-usage/client.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -86,6 +102,8 @@ window.__ModuleLoader__.load({
 		const WAN = 1e4;
 		const YI = 1e8;
 		const YI_CUTOFF = 9999.5 * WAN;
+		/** 消耗来源的颜色徽标；未列出的来源（如「未知模型」之外的自定义来源）落到默认灰。 */
+		const SRC_COLORS = { "对话": "#6cb6f5", "子代理": "#a892f0", "解析图片": "#6ecf9e" };
 		const h = react.createElement;
 
 		function measure(tokens) {
@@ -341,6 +359,124 @@ window.__ModuleLoader__.load({
 			);
 		}
 
+		/**
+		 * 柱状图下方的「最近消耗来源」明细列表。
+		 *
+		 * `sources` 已由宿主按「新到旧」排好（最多 MAX_SOURCES = 50 笔）。列表固定
+		 * 一块高度（PAGE_HEIGHT），**每页按高度决定行数**（PAGE_HEIGHT / ROW_HEIGHT
+		 * 向下取整）；超出一页就翻页：上一页 / 下一页 + 页码指示。
+		 *
+		 * 展示前先按「同一个对话」合并：带 `sessionId` 的会话内多笔并成一行（标题、
+		 * 模型、时间取合并结果，消耗相加，行尾标 ×N 次）；没有 `sessionId` 的外来
+		 * 上报（如解析图片）各自成行。列：类型 / 标题(如果有) / 模型 / 时间 / 消耗。
+		 */
+		function UsageSourcesList({ sources }) {
+			const PAGE_HEIGHT = 264;
+			const ROW_HEIGHT = 44;
+			const raw = Array.isArray(sources) ? sources : [];
+			// 合并：key = 会话 id（同一对话并一行）；外来上报没有会话 id → 各自成行。
+			const merged = new Map();
+			const modelSetOf = (row) => row._models || (row._models = new Set());
+			raw.forEach((entry, index) => {
+				const sessionId = typeof entry.sessionId === "string" ? entry.sessionId : "";
+				const key = sessionId.length > 0 ? "s:" + sessionId : "x:" + index;
+				const tokens = Number(entry.tokens) || 0;
+				const time = typeof entry.time === "string" ? entry.time : "";
+				let row = merged.get(key);
+				if (row === undefined) {
+					row = {
+						key,
+						sessionId,
+						source: entry.source || "未知",
+						title: typeof entry.title === "string" ? entry.title : "",
+						tokens: 0,
+						time: "",
+						count: 0
+					};
+					merged.set(key, row);
+				}
+				row.tokens += tokens;
+				row.count += 1;
+				if (time > row.time) row.time = time; // 同一会话取最近一次时间
+				modelSetOf(row).add(typeof entry.model === "string" ? entry.model : "");
+				if (typeof entry.title === "string" && entry.title.length > 0) row.title = entry.title;
+			});
+			const list = [...merged.values()]
+				.map((row) => {
+					const models = [...modelSetOf(row)].filter(Boolean);
+					return {
+						key: row.key,
+						sessionId: row.sessionId,
+						source: row.source,
+						title: row.title,
+						models,
+						tokens: row.tokens,
+						time: row.time,
+						count: row.count
+					};
+				})
+				.sort((a, b) => (String(b.time) < String(a.time) ? -1 : String(b.time) > String(a.time) ? 1 : a.key < b.key ? -1 : 1));
+
+			const pageSize = Math.max(1, Math.floor(PAGE_HEIGHT / ROW_HEIGHT));
+			const pages = Math.max(1, Math.ceil(list.length / pageSize));
+			const [page, setPage] = react.useState(0);
+			const safePage = Math.min(page, pages - 1);
+			const rows = list.slice(safePage * pageSize, (safePage + 1) * pageSize);
+			const srcColor = (src) => SRC_COLORS[src] || "#9aa3b5";
+			const rowKey = (row, index) => safePage + ":" + index + ":" + row.key;
+
+			return h(
+				"div",
+				{ className: "dshu-list" },
+				h(
+					"div",
+					{ className: "dshu-listHead" },
+					"最近消耗来源",
+					h("span", { className: "dshu-listCount" }, "共 " + raw.length + " 笔" + (list.length < raw.length ? " · 并成 " + list.length + " 行" : ""))
+				),
+				h(
+					"div",
+					{ className: "dshu-listBody" },
+					list.length === 0
+						? h("div", { className: "dshu-empty" }, "还没有来源记录。")
+						: rows.map((row, index) =>
+								h(
+									"div",
+									{ className: "dshu-lrow", key: rowKey(row, index) },
+									h(
+										"span",
+										{ className: "dshu-lsrc", style: { background: srcColor(row.source) } },
+										row.source
+									),
+									row.title.length > 0
+										? h("span", { className: "dshu-ltitle", title: row.title }, row.title)
+										: h("span", { className: "dshu-ltitle dshu-ltitleDim" }, "（无标题）"),
+									h("span", { className: "dshu-lmodel", title: row.models.join("、") }, row.models.join("、") || "—"),
+									h("span", { className: "dshu-lcount" }, row.count > 1 ? "×" + row.count : ""),
+									h("span", { className: "dshu-ltime" }, formatStamp(row.time)),
+									h(
+										"span",
+										{
+											className: "dshu-ltok",
+											title: String(Number(row.tokens) || 0) + " token"
+										},
+										formatAmount(row.tokens)
+									)
+								)
+							)
+				),
+				pages > 1
+					? h(
+							"div",
+							{ className: "dshu-pag" },
+							h("button", { type: "button", className: "dshu-btn", disabled: safePage <= 0, onClick: () => setPage(safePage - 1) }, "上一页"),
+							h("span", { className: "dshu-pagInfo" }, "第 " + (safePage + 1) + " / " + pages + " 页"),
+							h("button", { type: "button", className: "dshu-btn", disabled: safePage >= pages - 1, onClick: () => setPage(safePage + 1) }, "下一页")
+						)
+					: null
+			);
+		}
+
 		/** 面板数据：读快照 + 重读。 */
 		function useUsageData() {
 			const [state, setState] = react.useState({ phase: "loading", data: null, error: "" });
@@ -506,7 +642,8 @@ window.__ModuleLoader__.load({
 									" · " + formatStamp(file.mtime) + " 写入 · " + formatSize(file.size)
 								)
 							: null
-					)
+					),
+					h(UsageSourcesList, { sources: data?.sources ?? [] })
 				)
 			);
 		}

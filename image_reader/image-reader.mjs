@@ -713,6 +713,7 @@ export function apply(ctx, config) {
         && (Number.isFinite(result.usage.inputTokens) || Number.isFinite(result.usage.outputTokens))) {
         try {
           ctx.emit('dsh-usage/report', {
+            source: '解析图片',
             provider: vision.provider,
             model: vision.model,
             usage: {

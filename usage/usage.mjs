@@ -121,6 +121,17 @@ const DAY_MS = 24 * 60 * 60 * 1000
 /** 模型名读不出来时的占位，客户端按普通模型名处理。 */
 const UNKNOWN_MODEL = '未知模型'
 
+/** 消耗来源标签（客户端列表也用同样的文案）。 */
+const SOURCE_CONVERSATION = '对话'
+const SOURCE_SUBAGENT = '子代理'
+const SOURCE_EXTERNAL = '解析图片'
+
+/**
+ * 明细列表里最多保留多少笔最近的消耗来源（客户端翻页展示，见 lib/client.js）。
+ * 与 KEEP_DAYS（按天聚合的留存）互不影响：明细是**按笔**留，跟天不挂钩。
+ */
+const MAX_SOURCES = 50
+
 /* -------------------------------------------------------------------------- */
 /* 纯函数：时间、桶、事件取值                                                    */
 /* -------------------------------------------------------------------------- */
@@ -206,17 +217,39 @@ function reportModelLabel(report) {
   return provider.length > 0 ? `${provider} / 默认模型` : UNKNOWN_MODEL
 }
 
+/**
+ * 一笔会话结算的来源标签。子代理会话在 header 上标 `origin === 'subagent'`、
+ * `parentSession` 或 `delegationDepth`；都没有就当普通对话。
+ */
+function sourceOf(session) {
+  const header = session?.header
+  if (header === null || typeof header !== 'object') return SOURCE_CONVERSATION
+  if (
+    header.origin === 'subagent' ||
+    (typeof header.parentSession === 'string' && header.parentSession.length > 0) ||
+    (typeof header.delegationDepth === 'number' && header.delegationDepth > 0)
+  ) {
+    return SOURCE_SUBAGENT
+  }
+  return SOURCE_CONVERSATION
+}
+
 /* -------------------------------------------------------------------------- */
 /* 数据文件                                                                     */
 /* -------------------------------------------------------------------------- */
 
-const EMPTY_STATE = () => ({ version: 1, updatedAt: '', days: {} })
+const EMPTY_STATE = () => ({ version: 1, updatedAt: '', days: {}, sources: [] })
 
 function readState(path) {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'))
     if (parsed !== null && typeof parsed === 'object' && parsed.days !== null && typeof parsed.days === 'object') {
-      return { version: 1, updatedAt: String(parsed.updatedAt ?? ''), days: parsed.days }
+      return {
+        version: 1,
+        updatedAt: String(parsed.updatedAt ?? ''),
+        days: parsed.days,
+        sources: Array.isArray(parsed.sources) ? parsed.sources : []
+      }
     }
   } catch {
     // 文件不存在 / 坏了都当空账本，重来即可（这里不打印，免得每次启动刷日志）
@@ -283,7 +316,7 @@ function createCollector(path) {
   function slotOf(session) {
     let slot = slots.get(session)
     if (slot === undefined) {
-      slot = { model: '', last: undefined }
+      slot = { model: '', title: '', last: undefined }
       slots.set(session, slot)
     }
     return slot
@@ -300,6 +333,18 @@ function createCollector(path) {
   }
 
   /**
+   * 往明细列表头插一笔「消耗来源」，并裁到最多 MAX_SOURCES 笔。
+   * 明细是**按笔**留的独立列表（state.sources），跟按天的聚合账（days）互不影响；
+   * 客户端列表按「最近优先」展示，这里 unshift 到最前。
+   */
+  function recordSource(entry) {
+    if (entry === null || typeof entry !== 'object') return
+    const list = (state.sources ??= [])
+    list.unshift(entry)
+    if (list.length > MAX_SOURCES) list.length = MAX_SOURCES
+  }
+
+  /**
    * 折一个事件。
    * @param countUsage - false 表示这次只是回放旧日志补「当前模型」，不要计用量。
    * @returns 账本是否变化。
@@ -311,6 +356,32 @@ function createCollector(path) {
     if (event.type === 'request/header') {
       const model = modelOf(event)
       if (model.length > 0) slot.model = model
+      return false
+    }
+
+    // 会话标题：`session/title` 事件（last-wins）。标题用于客户端明细列表的「标题
+    // (如果有)」列；没到标题事件（或没装标题插件）就留空。放 countUsage 之前是
+    // 为了 warmUp 回放时也能把已有标题补进 slot。
+    // 标题常在有 usage 结算**之后**才生成，所以顺手回填：把同一会话里此前
+    // 记录过、还没标题的明细补上（最多扫 MAX_SOURCES 条，便宜）。
+    if (event.type === 'session/title') {
+      const title = event.data?.title
+      if (typeof title === 'string' && title.length > 0) {
+        slot.title = title
+        const sessionId = String(session?.header?.id ?? session?.id ?? '')
+        if (sessionId.length > 0) {
+          const sources = state.sources ?? []
+          let backfilled = false
+          for (const entry of sources) {
+            if (entry !== null && typeof entry === 'object' && entry.sessionId === sessionId && !entry.title) {
+              entry.title = title
+              backfilled = true
+            }
+          }
+          // 回填改了账本内容，需要落盘（返回 true 触发 track 的 schedule）
+          if (backfilled) return true
+        }
+      }
       return false
     }
 
@@ -353,6 +424,15 @@ function createCollector(path) {
     addToDay(day, model, buckets)
     if (previous === undefined || previous.model !== model) {
       state.days[day].models[model].calls += 1
+      recordSource({
+        time: new Date(Number(event?.time) || Date.now()).toISOString(),
+        source: sourceOf(session),
+        title: slot.title ?? '',
+        // 会话 id 作为「同一个对话」的合并键：客户端按它把同一会话的多笔并成一行。
+        sessionId: String(session?.header?.id ?? session?.id ?? ''),
+        model,
+        tokens: buckets.tokens
+      })
       prune(state, day)
     }
 
@@ -518,6 +598,17 @@ function createCollector(path) {
     const day = dayKey()
     addToDay(day, model, buckets)
     state.days[day].models[model].calls += 1
+    recordSource({
+      time: new Date().toISOString(),
+      // 上报方可以自带来源（如 image-reader 报 `source: '解析图片'`）；
+      // 没给就按「辅助 LLM 请求」兜底成解析图片（现唯一调用方就是视觉桥接）。
+      source: typeof report.source === 'string' && report.source.length > 0 ? report.source : SOURCE_EXTERNAL,
+      // 外来上报没有会话上下文：标题/会话 id 留空，客户端把它们当各自独立的一行。
+      title: '',
+      sessionId: typeof report.sessionId === 'string' ? report.sessionId : '',
+      model,
+      tokens: buckets.tokens
+    })
     prune(state, day)
     state.updatedAt = new Date().toISOString()
     schedule()
@@ -570,7 +661,15 @@ function createCollector(path) {
       file: fileInfo(),
       total: models.reduce((sum, model) => sum + model.tokens, 0),
       models,
-      days
+      days,
+      /**
+       * 最近 MAX_SOURCES 笔消耗来源明细，**新到旧**排（客户端列表直接按序铺）。
+       * 每笔：{ time(ISO), source, title?, sessionId?, model, tokens }。
+       * `sessionId` 是「同一个对话」的合并键（客户端据此把同一会话的多笔并成一行）；
+       * `title` 是会话标题（未取到留空）。外来上报没有会话 → sessionId/title 为空串。
+       * 注意 sources 与 days 的留存互不影响 —— 明细按笔留、跟天解耦，见 recordSource()。
+       */
+      sources: state.sources ?? []
     }
   }
 

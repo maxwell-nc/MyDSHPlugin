@@ -106,5 +106,16 @@ assert.equal(b.calls, 1)
 
 assert.equal(Object.keys(models).length, 2, '空 usage 与缺 usage 的上报不计账')
 
+// 5) 明细来源列表：两笔有效上报各记一笔，新到旧；没显式带 source 的兜底成「解析图片」
+assert.ok(Array.isArray(s.sources), '应有 sources 明细列表')
+assert.equal(s.sources.length, 2, '两笔有效上报 → 两笔来源明细')
+assert.equal(s.sources[0].model, 'deepseek-vl')
+assert.equal(s.sources[0].source, '解析图片', '未带 source 的上报默认归「解析图片」')
+assert.equal(s.sources[0].tokens, 70)
+assert.equal(s.sources[1].model, 'glm-5.3-vision')
+assert.equal(s.sources[1].source, '解析图片')
+assert.equal(s.sources[1].tokens, 140)
+assert.ok(typeof s.sources[0].time === 'string' && s.sources[0].time.length > 0, '来源明细应带时间戳')
+
 console.log('PASS: dsh-usage recordExternal/dsh-usage/report 集成自测通过')
 rmSync(tmp, { recursive: true, force: true })
