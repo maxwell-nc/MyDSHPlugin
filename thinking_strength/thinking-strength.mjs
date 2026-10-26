@@ -1,7 +1,9 @@
 /**
- * dsh-thinking-strength —— 为「当前模型」声明 / 删除 reasoningEfforts（host 半边）
+ * dsh-thinking-strength —— 让「当前模型」能思考，并且**记住每个模型的思考强度**（host 半边）
  * =====================================================================
  *
+ * 功能一：为当前模型声明 / 删除 reasoningEfforts
+ * ---------------------------------------------------------------------
  * 浏览器半边是一个勾选框（渲染在 `conversation.input.right`）：
  *
  *   - 勾选状态 = 当前模型在 llm-pi-ai 配置里是否声明了 `reasoningEfforts`；
@@ -19,6 +21,33 @@
  *
  * 生效方式：patch 文件写入后，长驻 surface（web GUI）会热重载 profile 补丁层；
  * 若模型选择器里的 effort 面板没有立刻出现，重开 profile / 重启 dsh 即生效。
+ *
+ * 功能二：按模型记住思考强度
+ * ---------------------------------------------------------------------
+ * DSH 核心没有「每模型记住档位」的概念：客户端点模型行时**不带** effort
+ * （ModelSelect 的 `choose({provider, model})`），host 的 `selectModel` 走
+ * `resolveCallConfig`，把缺省的 effort 解析成**该模型的默认档**
+ * （`llm` 的 `requested ?? reasoning.defaultEffort`）。所以切换模型再切回来，
+ * 内置 effort 面板里看到的是默认档，用户上次选的档丢了。
+ *
+ * 本插件在 host 半边补一张「provider/model → effort」记忆表，用事件回放补齐：
+ *
+ *   - 监听 `session/event`，只看 `model/selection`（这是 `selectModel` 落库的
+ *     唯一痕迹，两个模型入口、任何客户端都走它）；
+ *   - **路由变了** = 用户切换模型（effort 被重置成默认）→ 查记忆，
+ *     用 `ctx.sessionController.selectModel` 把记忆档补回去；
+ *   - **路由没变、effort 变了** = 用户在档位面板里主动改档 → 写进记忆。
+ *
+ * 为什么按「路由变没变」而不是「effort 变没变」判定：用户主动改档和切换模型
+ * 重置档位，在事件里长得一样（都是一条新的 model/selection），只有路由能区分。
+ * 记忆在回放时是幂等的（回放事件路由不变、effort 等于记忆值，只会再写一次同样的
+ * 记忆），不会自激；同一路由回放不改 provider/model，因此也不会触发核心的
+ * 「[model changed]」提示。
+ *
+ * 记忆表存在 profile 目录下的 `dsh-thinking-strength.efforts.json`
+ * （`{ version, providers: { <provider>: { <model>: <effort> } } }`），
+ * 删除该文件即清空记忆。不用 localStorage：Desktop 以 `--port 0` 启动，
+ * 每次重启端口变了 origin 也就变了，浏览器存储留不住。
  *
  * profile 定位：优先 `DSH_PROFILE_DIR` → `DSH_HOME`+`DSH_PROFILE` → 兜底扫描
  * `$DSH_HOME/profiles/*` 找装了本插件的目录（多个时取 patch 文件最新改动的）。
@@ -42,6 +71,13 @@ const API_SET = '/api/dsh-thinking-strength.set'
 
 /** 勾上时补全的默认档位：off 不传参（= 上游默认），其余档位直发 wire 值。 */
 const DEFAULT_EFFORTS = { off: null, low: 'low', high: 'high', max: 'max' }
+
+/** 记忆表文件名（落在 profile 目录下，与 cordis.patch.yml 同级）。 */
+const EFFORTS_FILE = 'dsh-thinking-strength.efforts.json'
+/** 记忆表格式版本，将来改结构时用来判定兼容。 */
+const EFFORTS_VERSION = 1
+/** 路由键分隔符：provider 与 model 都不会包含 NUL。 */
+const ROUTE_SEP = '\u0000'
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'cache-control': 'no-store' } })
@@ -89,6 +125,17 @@ function resolveProfileDir() {
 /** profile 下的用户补丁层（llm-pi-ai 配置就写在这里）。 */
 function patchFileOf(profileDir) {
   return join(profileDir, 'cordis.patch.yml')
+}
+
+/** profile 下的思考强度记忆表。 */
+function effortsFileOf(profileDir) {
+  return join(profileDir, EFFORTS_FILE)
+}
+
+function writeFileAtomic(file, content) {
+  const tmp = `${file}.tmp`
+  writeFileSync(tmp, content, 'utf8')
+  renameSync(tmp, file)
 }
 
 /* -------------------------------------------------------------------------- */
@@ -168,12 +215,6 @@ function defaultModel(ctx) {
   return null
 }
 
-function writePatchAtomic(file, content) {
-  const tmp = `${file}.tmp`
-  writeFileSync(tmp, content, 'utf8')
-  renameSync(tmp, file)
-}
-
 /** 从 Request 里取查询参数（兼容绝对/相对 URL）。 */
 function queryParamsOf(request) {
   const urlText = String(request.url ?? '')
@@ -182,10 +223,234 @@ function queryParamsOf(request) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* 思考强度记忆：表、持久化                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** routeKey → effort（字符串档位 id）。进程内唯一一份。 */
+const efforts = new Map()
+/** Session → 上一次观察到的路由键（WeakMap：会话销毁即回收）。 */
+const lastRoute = new WeakMap()
+/** 记忆表是否已从磁盘载入（只载入一次）。 */
+let effortsLoaded = false
+
+/**
+ * 惰性载入记忆表：profile 目录当时定位不到就不标记已载入，留给下一次机会。
+ * 任何会读/改记忆的入口都先过这里，避免「没载入就保存」把磁盘上的表写空。
+ */
+function ensureEffortsLoaded() {
+  if (!effortsLoaded) loadEfforts(resolveProfileDir())
+  return effortsLoaded
+}
+
+function routeKey(provider, model) {
+  return `${provider}${ROUTE_SEP}${model}`
+}
+
+function routeLabel(key) {
+  const at = key.indexOf(ROUTE_SEP)
+  return at < 0 ? key : `${key.slice(0, at)} / ${key.slice(at + 1)}`
+}
+
+/** 载入记忆表；文件不存在或损坏都按空表处理，绝不让插件起不来。 */
+function loadEfforts(profileDir) {
+  if (effortsLoaded) return
+  if (profileDir === null) {
+    console.error(`${TAG} 记忆表暂未载入：profile 目录还没定位到`)
+    return
+  }
+  effortsLoaded = true
+  const file = effortsFileOf(profileDir)
+  if (!existsSync(file)) return
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    const providers = parsed?.providers
+    if (providers === null || typeof providers !== 'object') return
+    for (const [provider, models] of Object.entries(providers)) {
+      if (models === null || typeof models !== 'object') continue
+      for (const [model, effort] of Object.entries(models)) {
+        if (typeof effort === 'string' && effort.length > 0) efforts.set(routeKey(provider, model), effort)
+      }
+    }
+    console.error(`${TAG} 已载入 ${efforts.size} 条思考强度记忆：${file}`)
+  } catch (error) {
+    console.error(`${TAG} 记忆表读取失败（按空表处理）：${reasonOf(error)}`)
+  }
+}
+
+/** 落盘记忆表（临时文件 + rename）。profile 没定位到就只在内存里记。 */
+function saveEfforts() {
+  const profileDir = resolveProfileDir()
+  if (profileDir === null) {
+    console.error(`${TAG} 记忆表未落盘：profile 目录没定位到`)
+    return
+  }
+  const providers = {}
+  for (const [key, effort] of efforts) {
+    const at = key.indexOf(ROUTE_SEP)
+    const provider = key.slice(0, at)
+    const model = key.slice(at + 1)
+    providers[provider] ??= {}
+    providers[provider][model] = effort
+  }
+  const payload = `${JSON.stringify({ version: EFFORTS_VERSION, providers }, null, 2)}\n`
+  writeFileAtomic(effortsFileOf(profileDir), payload)
+}
+
+/** 记下一个模型的档位（同值不重复写盘）。 */
+function rememberEffort(key, effort) {
+  if (typeof effort !== 'string' || effort.length === 0) return
+  ensureEffortsLoaded()
+  if (efforts.get(key) === effort) return
+  efforts.set(key, effort)
+  try {
+    saveEfforts()
+    console.error(`${TAG} 已记住思考强度：${routeLabel(key)} = ${effort}`)
+  } catch (error) {
+    console.error(`${TAG} 记忆表落盘失败：${reasonOf(error)}`)
+  }
+}
+
+/** 丢弃一个模型的档位（记忆里的档位不再被该模型接受时）。 */
+function forgetEffort(key) {
+  ensureEffortsLoaded()
+  if (!efforts.delete(key)) return
+  try {
+    saveEfforts()
+    console.error(`${TAG} 已丢弃失效的思考强度记忆：${routeLabel(key)}`)
+  } catch (error) {
+    console.error(`${TAG} 记忆表落盘失败：${reasonOf(error)}`)
+  }
+}
+
+/** 该错误是否表示「模型不接受这个档位」（配置变了 / 勾选框被取消）。 */
+function isUnsupportedEffort(error) {
+  const message = String(error?.message ?? error)
+  return error?.code === 'UNSUPPORTED_REASONING_EFFORT'
+    || message.includes('UNSUPPORTED_REASONING_EFFORT')
+    || /does not support reasoning effort/i.test(message)
+}
+
+/* -------------------------------------------------------------------------- */
+/* 思考强度记忆：事件回放                                                        */
+/* -------------------------------------------------------------------------- */
+
+/** 安全读会话事件快照（读不到就当没有历史）。 */
+function sessionEvents(session) {
+  try {
+    return typeof session.snapshotEvents === 'function' ? session.snapshotEvents() : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 推断「本条 model/selection 之前」会话处在哪个路由上。
+ *
+ * 首次观察一个会话时需要它，才能把「切换模型」和「同模型改档」区分开：
+ *   1. 日志里上一条 model/selection（最常见的恢复场景）；
+ *   2. 会话最近一次请求头（从未显式选过模型、但发过消息）；
+ *   3. 宿主的默认模型（全新会话）。
+ * 三者都取不到就返回 undefined —— 此时本条事件按「首见」处理，只记录不回放。
+ */
+function previousRouteOf(ctx, session, event) {
+  const events = sessionEvents(session)
+  const rawSeq = typeof event?.seq === 'number' ? event.seq : events.length
+  const start = Math.min(rawSeq, events.length) - 1
+  for (let i = start; i >= 0; i--) {
+    const candidate = events[i]
+    if (candidate?.type !== 'model/selection') continue
+    return routeKey(candidate.data.provider, candidate.data.model)
+  }
+  try {
+    const header = typeof session.requestHeader === 'function' ? session.requestHeader() : undefined
+    const config = header?.config
+    if (config && typeof config.provider === 'string' && typeof config.model === 'string') {
+      return routeKey(config.provider, config.model)
+    }
+  } catch { /* ignore */ }
+  const fallback = defaultModel(ctx)
+  return fallback === null ? undefined : routeKey(fallback.provider, fallback.model)
+}
+
+/**
+ * 把记忆里的档位补回当前模型。
+ *
+ * 回放必须跨出 `session/event` 的发布窗口：`Session.append` 不允许重入
+ * （见 core/session 的 publicationEntry）。回放前再核一次当前路由，避免
+ * 用户已经切走、这条迟到的回放把新模型盖回去。
+ */
+function replayEffort(controller, projections, session, selection, effort) {
+  void (async () => {
+    await Promise.resolve()
+    try {
+      let current = null
+      try {
+        const projection = projections.stateOf(session, 'modelSelection')
+        current = projection?.pending ?? projection?.lastUsed ?? null
+      } catch { /* 读不到就按「路由未变」处理 */ }
+      if (current !== null
+        && (current.provider !== selection.provider || current.model !== selection.model)) return
+
+      await controller.selectModel({
+        sessionId: session.id,
+        provider: selection.provider,
+        model: selection.model,
+        reasoningEffort: effort,
+      })
+      console.error(`${TAG} 已为 ${selection.provider} / ${selection.model} 恢复思考强度：${effort}`)
+    } catch (error) {
+      if (isUnsupportedEffort(error)) {
+        forgetEffort(routeKey(selection.provider, selection.model))
+        return
+      }
+      console.error(`${TAG} 恢复思考强度失败：${reasonOf(error)}`)
+    }
+  })()
+}
+
+/**
+ * 装上记忆表：一个 `session/event` 观察者，把「切换模型」与「改档」分开处理。
+ * @param ctx - 插件上下文（root）。
+ */
+function applyEffortMemory(ctx) {
+  ctx.inject(['sessionController', 'sessionProjections'], (scoped) => {
+    const controller = scoped.sessionController
+    const projections = scoped.sessionProjections
+    ensureEffortsLoaded()
+
+    scoped.on('session/event', (session, event) => {
+      if (event?.type !== 'model/selection') return
+      // 子会话的模型由委派策略决定，不参与记忆回放。
+      if (session?.header?.origin === 'subagent') return
+      const selection = event.data
+      if (typeof selection?.provider !== 'string' || typeof selection?.model !== 'string') return
+      ensureEffortsLoaded()
+
+      const key = routeKey(selection.provider, selection.model)
+      const previous = lastRoute.get(session) ?? previousRouteOf(ctx, session, event)
+      lastRoute.set(session, key)
+
+      if (previous === undefined || previous === key) {
+        // 同路由 = 用户在档位面板里的主动选择（含「恢复默认档」），记下来。
+        rememberEffort(key, selection.reasoningEffort)
+        return
+      }
+      const wanted = efforts.get(key)
+      if (wanted === undefined || wanted === selection.reasoningEffort) return
+      replayEffort(controller, projections, session, selection, wanted)
+    })
+
+    const dir = resolveProfileDir()
+    console.error(`${TAG} 思考强度记忆：${dir === null ? '（profile 目录未定位到，仅内存）' : effortsFileOf(dir)}`)
+  })
+}
+
+/* -------------------------------------------------------------------------- */
 /* 面板 / API                                                                   */
 /* -------------------------------------------------------------------------- */
 
-export function apply(ctx) {
+/** 注册 /api 路由：读/写当前模型的 reasoningEfforts 声明状态。 */
+function applyRoutes(ctx) {
   ctx.inject(['connection'], (scoped) => {
     const conn = scoped.connection
 
@@ -245,8 +510,10 @@ export function apply(ctx) {
         } else {
           doc.deleteIn([...located.base, 'reasoningEfforts'])
         }
-        writePatchAtomic(file, doc.toString({ lineWidth: 0 }))
+        writeFileAtomic(file, doc.toString({ lineWidth: 0 }))
         console.error(`${TAG} ${enabled ? '已补全' : '已删除'} reasoningEfforts：${provider} / ${model} -> ${file}`)
+        // 取消声明后，该模型的档位已不可用，记忆也没意义了。
+        if (!enabled) forgetEffort(routeKey(provider, model))
         return json({ ok: true, provider, model, enabled, profile: basename(profileDir), patch: file })
       } catch (error) {
         return json({ ok: false, error: reasonOf(error) }, 500)
@@ -270,6 +537,11 @@ export function apply(ctx) {
     const dir = resolveProfileDir()
     console.error(`${TAG} patch = ${dir ? patchFileOf(dir) : '（profile 目录未定位到）'}`)
   })
+}
+
+export function apply(ctx) {
+  applyEffortMemory(ctx)
+  applyRoutes(ctx)
 }
 
 export const inject = []

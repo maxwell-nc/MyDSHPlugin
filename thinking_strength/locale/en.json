@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Thinking Strength",
-    "description": "Adds an A / H / M radio group to the left of the model picker in the input box, so you can switch the current model's thinking strength: A = auto (the model's own default), H = high, M = max. The strength is persisted per model and comes back automatically when you switch models; models without a saved value default to auto."
+    "description": "A \"thinking\" checkbox beside the model picker: ticking it declares reasoningEfforts for the current model (which makes the built-in effort pane appear), unticking it removes that declaration. The chosen effort is remembered per model, so switching away and back brings back the level you picked instead of resetting it."
   }
 }
