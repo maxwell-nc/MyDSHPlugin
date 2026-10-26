@@ -177,8 +177,10 @@ window.__ModuleLoader__.load({
 				if (rect === null) return;
 				let left = rect.left;
 				if (left + LIST_WIDTH > window.innerWidth - 12) left = Math.max(12, window.innerWidth - LIST_WIDTH - 12);
-				let top = rect.top - LIST_HEIGHT - 8;
-				if (top < 12) top = rect.bottom + 8;
+				// 优先在按钮下方展开，避免列表盖住按钮；下方放不下才翻到上方。
+				// 上方展开时留足 18px，避开按钮/输入行的投影。
+				let top = rect.bottom + 8;
+				if (top + LIST_HEIGHT > window.innerHeight - 12) top = rect.top - LIST_HEIGHT - 18;
 				setPos({ left: left, top: top });
 			}, []);
 
