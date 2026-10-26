@@ -1,0 +1,37 @@
+{
+  "name": "dsh-open",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "用系统默认工具打开文件与文件夹：文件夹交给系统实际注册的默认文件管理器（本机是 Directory Opus，走 dopusrt /open 并置前），文件按关联程序打开、或在其文件管理器中定位并选中。Web 半边在文档预览标题栏与文件树标题栏各加一个按钮。",
+  "exports": {
+    ".": "./dsh-open.mjs",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "dsh-open.mjs",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.2 <0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  }
+}

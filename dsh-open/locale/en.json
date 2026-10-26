@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Open With (system default)",
+    "description": "Opens files and folders with the tools the system actually registers as default: folders go to the default file manager (Directory Opus on this machine, via dopusrt /open, then brought to the front), files open with their associated application or are revealed and selected in that file manager. Adds one button to the conversation header, the document preview header and the file tree header. The shipped \"open folder location\" control hardcodes explorer.exe on Windows, so it always opens Explorer even when the default manager is Opus; this plugin bypasses that limit."
+  }
+}
