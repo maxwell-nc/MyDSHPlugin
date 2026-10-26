@@ -26,39 +26,46 @@ DSH 的上下文容量靠**模型目录声明**取值：llm-pi-ai 校验层只�
 这正是 llm-pi-ai 给手写 provider 模型声明能力的字段，和思考插件的
 `reasoningEfforts` 是同一类声明式能力。
 
+写入不自己解析 YAML，而是走**宿主自己的 `ctx.configEditor` 服务**（`config-editor` 插件）：
+
+- 由它加锁、重新读盘、按 llm-pi-ai 自己的 Config 校验、写 profile 补丁层、调和 Loader 热重载；
+- 只重写 llm-pi-ai 那一行（该行会被重新序列化，行内注释会给格式化掉），文件里其余行与注释原样保留；
+- 所以**只装桌面版、没装 CLI 也能用** —— 插件不需要 `yaml` 库（profile 的 `node_modules` 里只有
+  profile 安装的 bundle，其中 `yaml` 软链还可能指向已经删掉的 CLI 安装）。
+
 ## 怎么工作
 
 **宿主半边**（`context-1m.mjs`）解释：
 
 - 定位 profile：优先 `DSH_PROFILE_DIR` → `DSH_HOME` + `DSH_PROFILE` → 兜底扫描
-  `$DSH_HOME/profiles/*` 找装了本插件的目录。
-- 读写目标：`<profile>/cordis.patch.yml` 里 llm-pi-ai 条目的
-  `config.providers.<provider>.models[].contextWindow` 与 `.maxTokens`。
-- YAML 用 profile 共享 store 里的 `yaml`（`parseDocument`），改目标模型那一段时
-  **保留其它注释与排版**；写文件走「临时文件 + rename」。
+  `$DSH_HOME/profiles/*` 找装了本插件的目录（只用于兜底；配置读写交给 `configEditor`）。
+- 读写目标：llm-pi-ai 条目的 `config.providers.<provider>.models[].contextWindow` 与 `.maxTokens`，
+  经宿主的 `ctx.configEditor`（`entries()` 找条目、`edit()` 落盘并热重载）。
 - 勾上写入的默认值：`{ contextWindow: 1000000, maxTokens: 128000 }`（1M 上下文 + 128K 最大输出）。
+- 已经是目标状态就不写盘（不白改一次排版）；只写了一半（比如只有 1M、maxTokens 还是 32K）会补齐。
 
 **网页半边**（`lib/client.js`）是输入框里的勾选框，走两个 /api：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/dsh-context-1m.state?provider=&model=` | `{ok, provider, model, has, declared, declaredMaxTokens}` |
-| POST | `/api/dsh-context-1m.set` | `{provider, model, enabled}` 写入 / 删除 |
+| GET | `/api/dsh-context-1m.state?provider=&model=` | `{ok, provider, model, has, declared, declaredMaxTokens, profile, patch}` |
+| POST | `/api/dsh-context-1m.set` | `{provider, model, enabled}` 写入 / 删除，回 `{ok, changed, ...}` |
 
-切换模型时勾选框自动回读、状态按模型独立；出错（模型不在 llm-pi-ai 配置里等）会在
-勾选框的 tooltip 里显示具体原因。
+切换模型时勾选框自动回读、状态按模型独立；出错（模型不在 llm-pi-ai 配置里、`configEditor`
+不可用等）会在勾选框的 tooltip 里显示具体原因。
 
 ## 生效时机
 
-patch 文件写入后，长驻 surface（web GUI）会热重载 profile 补丁层。若上下文容量提示
-没有**立刻**变化，重开 profile / 重启 dsh 即生效。
+写入走 `configEditor.edit()`，它在同一个调用里就调和了 Loader，所以上下文容量提示通常
+**立刻**更新。若没有，重开 profile / 重启 dsh 即生效。
 
 ## 文件
 
 - `package.json` —— 组合包清单：`dsh.bundle.patch`、`dsh.client`、`peerDependencies`
 - `cordis.patch.yml` —— 补丁片段：把宿主半边插进 profile 插件树（`name` 裸包标识符）
-- `context-1m.mjs` —— 宿主半边（profile 定位 + patch 编辑 + /api）
+- `context-1m.mjs` —— 宿主半边（configEditor 读写 + /api）
 - `lib/client.js` —— 网页半边（输入框里的勾选框）
+- `test/api.test.mjs` —— 勾选框读写的回归测试（`pnpm test`）
 - `locale/zh.json`、`locale/en.json` —— 组合包列表里的标题 / 简介
 
 ## 安装
@@ -85,6 +92,10 @@ DSH 会把插件行强制停用）。
 ## 边界与已知行为
 
 - 只修改 llm-pi-ai 配置里「已存在的模型条目」；模型不在配置里会报错并保持不变。
+- 需要 profile 挂着 `config-editor`（`ctx.configEditor`）。没有它时勾选框会显示
+  「宿主的 configEditor 服务不可用」而不是静默失败。
+- 若 llm-pi-ai 的配置被更上层（home patch / 命令行覆盖 / settings 文档）压住，
+  `configEditor.edit()` 会拒绝写入并把原因回给 tooltip，磁盘上不会留下半成品。
 - 取消勾选是删除 `contextWindow` 字段（模型回到适配器默认 / provider 的
   `defaultContextWindow`，而不是恢复到勾选前的某个具体值）。
 - 若某个 provider 的 `defaultContextWindow` 本身就不是 1M，且你不想动 provider，

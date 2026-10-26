@@ -1,6 +1,6 @@
 {
   "name": "dsh-context-1m",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "勾选框：为当前模型声明 / 删除 1M 上下文（contextWindow = 1,000,000 token）",
@@ -17,6 +17,9 @@
     "cordis.patch.yml",
     "locale/*.json"
   ],
+  "scripts": {
+    "test": "node test/api.test.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
