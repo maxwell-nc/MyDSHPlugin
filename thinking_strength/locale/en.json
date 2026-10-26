@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Thinking Strength",
-    "description": "A \"thinking\" checkbox beside the model picker: ticking it declares reasoningEfforts for the current model (which makes the built-in effort pane appear), unticking it removes that declaration. The chosen effort is remembered per model, so switching away and back brings back the level you picked instead of resetting it."
+    "description": "A self-drawn model seat: the left model button shows only the short name after the last slash and opens a model list for direct selection; the right 5-level slider switches thinking strength (default/low/medium/high/max). The chosen level is remembered per model, so switching away and back restores your pick instead of resetting it."
   }
 }

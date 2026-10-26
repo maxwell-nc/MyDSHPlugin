@@ -2,22 +2,29 @@
  * dsh-thinking-strength —— 让「当前模型」能思考，并且**记住每个模型的思考强度**（host 半边）
  * =====================================================================
  *
- * 功能一：为当前模型声明 / 删除 reasoningEfforts
+ * 功能一：自绘模型选择座 + 为当前模型声明 / 删除 reasoningEfforts
  * ---------------------------------------------------------------------
- * 浏览器半边是一个勾选框（渲染在 `conversation.input.right`）：
+ * 浏览器半边替换了内置的模型选择按钮（`conversation.input.model` seat，
+ * priority -1 盖掉内置），渲染成两个相邻控件：
  *
- *   - 勾选状态 = 当前模型在 llm-pi-ai 配置里是否声明了 `reasoningEfforts`；
- *   - 勾上   → 往 profile 的 `cordis.patch.yml`（llm-pi-ai 条目里该模型的
- *             `providers.<provider>.models[].reasoningEfforts`）**补全**一份默认档位：
- *             `{ off: null, low: low, high: high, max: max }`；
- *   - 取消   → 从该模型条目里**删除** `reasoningEfforts` 字段。
+ *   - 左侧「选模型」按钮：只显示斜杠后的短名（`opencode/glm-5.3 → glm-5.3`），
+ *     单击打开**复用** `modelDirectories` 共享目录数据的模型列表（直达选择，
+ *     与 /model 弹窗同一份数据，切模型走同一个 selectModel）；
+ *   - 右侧 5 档思考强度滑块：默认 / 低 / 中 / 高 / 最大（wire 依次为
+ *     undefined / low / medium / high / max）。
+ *
+ * 选非「默认」档前，滑块先调 `/ensure` 把当前模型在 llm-pi-ai 配置里
+ * （`providers.<provider>.models[].reasoningEfforts`）**补全**成一份完整 5 档
+ * `{ off: null, low: low, medium: medium, high: high, max: max }`（medium 是
+ * pi-ai 的 THINKING_LEVELS 标准档，保证「中」能发出去），再 selectModel 设档。
+ * 选「默认」档 = 不显式发 reasoning_effort（用模型默认档）。
  *
  * 为什么改的是 patch 文件而不是 llm 请求：DSH 的 llm 校验层
  * （resolveCallWithInfo）只接受「模型目录声明过的档位」；模型没声明时任何显式
  * reasoningEffort 都会抛 UNSUPPORTED_REASONING_EFFORT。`reasoningEfforts` 就是
  * llm-pi-ai 给手写 provider 模型声明能力的字段 —— 它物化成 reasoning:true +
- * thinkingLevelMap，内置 ModelSelect 的 effort 面板才会出现，`reasoning_effort`
- * 才会随请求发出（openai-completions 默认走 `params.reasoning_effort = wire`）。
+ * thinkingLevelMap，`reasoning_effort` 才随请求发出（openai-completions 默认走
+ * `params.reasoning_effort = wire`）。
  *
  * 生效方式：写入走宿主的 `ctx.configEditor.edit()`，它会在同一个调用里调和 Loader
  * （reconcileProfilePatches），所以模型选择器里的 effort 面板通常立刻出现；
@@ -70,9 +77,27 @@ export const name = 'dsh-thinking-strength'
 const TAG = '[dsh-thinking-strength]'
 const API_STATE = '/api/dsh-thinking-strength.state'
 const API_SET = '/api/dsh-thinking-strength.set'
+const API_ENSURE = '/api/dsh-thinking-strength.ensure'
 
-/** 勾上时补全的默认档位：off 不传参（= 上游默认），其余档位直发 wire 值。 */
-const DEFAULT_EFFORTS = { off: null, low: 'low', high: 'high', max: 'max' }
+/**
+ * 勾选 / 滑块声明时补全的默认档位：off 不传参（= 上游默认），其余档位直发 wire 值。
+ * 5 档滑块（默认/低/中/高/最大）对应 low/medium/high/max；medium 是 pi-ai 的
+ * 标准 thinking level（THINKING_LEVELS 含 medium），所以一并补进声明。
+ */
+const DEFAULT_EFFORTS = { off: null, low: 'low', medium: 'medium', high: 'high', max: 'max' }
+
+/** 两个对象是否逐键等值（用于判断「已经是目标档位，不必重写」）。 */
+function effortsEqual(a, b) {
+  if (a === null || typeof a !== 'object') return false
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  for (const key of bKeys) {
+    if (!(key in a)) return false
+    if ((a[key] ?? null) !== (b[key] ?? null)) return false
+  }
+  return true
+}
 
 /** 记忆表文件名（落在 profile 目录下，与 cordis.patch.yml 同级）。 */
 const EFFORTS_FILE = 'dsh-thinking-strength.efforts.json'
@@ -500,9 +525,48 @@ function applyRoutes(ctx) {
       }
     }
 
+    /** 声明兜底：把当前模型的 reasoningEfforts 强制补全成 5 档（含 medium）。 */
+    const handleEnsure = async (request) => {
+      try {
+        let body
+        try {
+          body = await request.json()
+        } catch {
+          return json({ ok: false, error: '请求体不是合法 JSON' }, 400)
+        }
+        const provider = typeof body?.provider === 'string' ? body.provider.trim() : ''
+        const model = typeof body?.model === 'string' ? body.model.trim() : ''
+        if (!provider || !model) return json({ ok: false, error: '缺少 provider / model' }, 400)
+
+        const editor = configEditorOf(ctx)
+        if (editor === undefined) throw new Error('宿主的 configEditor 服务不可用（当前 profile 没挂 profile 配置层）')
+        const entry = llmEntryOf(editor)
+        if (entry === undefined) return json({ ok: false, error: 'llm-pi-ai 不在当前 profile 的插件树里' }, 404)
+        const patch = editor.documentPath
+
+        const before = locateModel(entry.options?.config ?? {}, provider, model)
+        if (!before.ok) return json({ ok: false, error: before.why }, 404)
+        // 已是完整 5 档就不写盘（edit 会重新序列化 llm-pi-ai 一行，没必要白改排版）。
+        if (effortsEqual(before.target.reasoningEfforts, DEFAULT_EFFORTS)) {
+          return json({ ok: true, provider, model, changed: false, profile: basename(dirname(patch)), patch })
+        }
+        await editor.edit(entry, (current) => {
+          const located = locateModel(current, provider, model)
+          if (!located.ok) throw new Error(located.why)
+          located.target.reasoningEfforts = { ...DEFAULT_EFFORTS }
+          return current
+        })
+        console.error(`${TAG} 已补全 5 档 reasoningEfforts（含 medium）：${provider} / ${model} -> ${patch}`)
+        return json({ ok: true, provider, model, changed: true, profile: basename(dirname(patch)), patch })
+      } catch (error) {
+        return json({ ok: false, error: reasonOf(error) }, 500)
+      }
+    }
+
     const routes = [
       { path: API_STATE, methods: ['GET'], fetch: (request) => handleState(request) },
-      { path: API_SET, methods: ['POST'], fetch: (request) => handleSet(request) }
+      { path: API_SET, methods: ['POST'], fetch: (request) => handleSet(request) },
+      { path: API_ENSURE, methods: ['POST'], fetch: (request) => handleEnsure(request) }
     ]
     // 一条一条注册、各自 try：热重载时一条失败不连累另一条
     for (const route of routes) {

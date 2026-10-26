@@ -1,9 +1,9 @@
 {
   "name": "dsh-thinking-strength",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
-  "description": "勾选框：为当前模型声明 / 删除 llm-pi-ai 配置里的 reasoningEfforts；并按模型记住思考强度",
+  "description": "自绘模型选择座（斜杠后短名按钮 + 直达模型列表）与 5 档思考强度滑块（默认/低/中/高/最大）；按模型记住思考强度",
   "exports": {
     ".": "./thinking-strength.mjs",
     "./client": "./lib/client.js",

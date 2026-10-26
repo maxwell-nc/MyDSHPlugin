@@ -138,6 +138,7 @@ async function boot({ defaultModel = null, memoryFile = null, config = null, noE
     liveConfig: () => liveConfig,
     get: (suffix, query = '') => post(`${suffix}${query}`, undefined),
     set: (body) => post('.set', body),
+    ensure: (body) => post('.ensure', body),
     patchText: () => { try { return readFileSync(patchPath, 'utf8') } catch { return '' } },
     setFailure: (fn) => { failWith = fn },
     readMemory: () => (() => {
@@ -271,8 +272,8 @@ console.log('用例 9：勾选 → 补全默认档位并写盘')
   const b = await boot({ config: PILOT })
   const res = await b.set({ provider: 'merge', model: 'B', enabled: true })
   ok('接口成功', res.body.ok === true && res.body.changed === true, res.body)
-  ok('补全 off/low/high/max', JSON.stringify(b.liveConfig().providers.merge.models[1].reasoningEfforts)
-    === JSON.stringify({ off: null, low: 'low', high: 'high', max: 'max' }), b.liveConfig().providers.merge.models[1])
+  ok('补全默认 5 档（含 medium）', JSON.stringify(b.liveConfig().providers.merge.models[1].reasoningEfforts)
+    === JSON.stringify({ off: null, low: 'low', medium: 'medium', high: 'high', max: 'max' }), b.liveConfig().providers.merge.models[1])
   const state = await b.get('.state', '?provider=merge&model=B')
   ok('再读 state = has=true', state.body.has === true, state.body)
 }
@@ -287,6 +288,23 @@ console.log('用例 10：已经是目标状态 → 不写盘（不白改排版�
   ok('changed=false（已声明）', on.body.ok === true && on.body.changed === false, on.body)
   ok('一次都没调 edit', b.editCalls.length === 0, b.editCalls)
   ok('配置没变', JSON.stringify(b.liveConfig()) === JSON.stringify(before), b.liveConfig())
+}
+
+console.log('用例 11a：/ensure 把部分声明升级成完整 5 档（含 medium），且幂等')
+{
+  const b = await boot({ config: PILOT })
+  // A 只声明了 off/high（无 medium）；ensure 应补齐成完整 5 档。
+  const first = await b.ensure({ provider: 'merge', model: 'A' })
+  ok('ensure 成功且 changed=true', first.body.ok === true && first.body.changed === true, first.body)
+  ok('A 已补成完整 5 档', JSON.stringify(b.liveConfig().providers.merge.models[0].reasoningEfforts)
+    === JSON.stringify({ off: null, low: 'low', medium: 'medium', high: 'high', max: 'max' }), b.liveConfig().providers.merge.models[0])
+  ok('同 provider 其它模型未被改动', b.liveConfig().providers.merge.models[1].reasoningEfforts === undefined, b.liveConfig())
+  const second = await b.ensure({ provider: 'merge', model: 'A' })
+  ok('再次 ensure → changed=false（已是目标状态）', second.body.ok === true && second.body.changed === false, second.body)
+  ok('ensure 只写盘一次', b.editCalls.length === 1, b.editCalls)
+  const missing = await b.ensure({ provider: 'merge', model: 'Z' })
+  ok('未知模型 ensure 404', missing.status === 404, missing.body)
+  ok('不预留任何档位记忆', b.readMemory()?.providers === undefined, b.readMemory())
 }
 
 console.log('用例 11：模型/provider 不在 llm-pi-ai 里 → 404 且不动配置')
