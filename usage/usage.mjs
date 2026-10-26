@@ -108,12 +108,14 @@ const API_PATH = '/api/usage.data'
 const FLUSH_DELAY_MS = 800
 
 /**
- * 数据保留天数 —— 插件里唯一的天数配置，三处共用同一口径：
+ * 数据保留天数上限（历史最多保留这么多天）—— 三处共用同一口径：
  *   - 账本只保留最近 `KEEP_DAYS` 天，**更早的每天清理一次**（见 maintain()）
  *   - `payload()` 的 `total` / `models` / `days` 也只取最近这 `KEEP_DAYS` 天
- *   - 客户端柱状图横轴固定画 `KEEP_DAYS` 天（lib/client.js 里的 MAX_DAYS 与之对齐）
+ *   - 客户端柱状图的**可选范围上限**是 `KEEP_DAYS` 天（lib/client.js 里的
+ *     MAX_DAYS 与之对齐）；具体画多宽由客户端「日期范围选择」决定（默认最近
+ *     DEFAULT_RANGE_DAYS 天，最少选 MIN_RANGE_DAYS=2 天）
  */
-const KEEP_DAYS = 15
+const KEEP_DAYS = 60
 
 /** 每天清理一次的间隔（毫秒）。 */
 const DAY_MS = 24 * 60 * 60 * 1000
