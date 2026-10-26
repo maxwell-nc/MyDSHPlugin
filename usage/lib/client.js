@@ -208,6 +208,11 @@ window.__ModuleLoader__.load({
 			return tail.length > 0 ? tail : s;
 		}
 
+		/** 首字母小写 → 大写（仅显示）；已大写/非字母开头保持不变。 */
+		function cap(s) {
+			return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s;
+		}
+
 		/**
 		 * 在选定的日期序列里重新聚合「天 × 模型」视图。
 		 *
@@ -229,7 +234,7 @@ window.__ModuleLoader__.load({
 				for (const raw of Object.keys(day.models || {})) {
 					const bucket = day.models[raw];
 					if (!bucket || !(bucket.tokens > 0)) continue;
-					const label = hidePrefix ? stripModelPrefix(raw) : raw;
+					const label = hidePrefix ? cap(stripModelPrefix(raw)) : raw;
 					const key = (hidePrefix ? label.toLowerCase() : label) || label;
 					const target = (row.models[key] =
 						row.models[key] || { tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 });
@@ -692,7 +697,7 @@ window.__ModuleLoader__.load({
 				row.tokens += tokens;
 				row.count += 1;
 				if (time > row.time) row.time = time; // 同一会话取最近一次时间
-				modelSetOf(row).add(hidePrefix ? stripModelPrefix(entry.model) : typeof entry.model === "string" ? entry.model : "");
+				modelSetOf(row).add(hidePrefix ? cap(stripModelPrefix(entry.model)) : typeof entry.model === "string" ? entry.model : "");
 				if (typeof entry.title === "string" && entry.title.length > 0) row.title = entry.title;
 			});
 			const list = [...merged.values()]
