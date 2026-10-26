@@ -19,8 +19,9 @@
  * thinkingLevelMap，内置 ModelSelect 的 effort 面板才会出现，`reasoning_effort`
  * 才会随请求发出（openai-completions 默认走 `params.reasoning_effort = wire`）。
  *
- * 生效方式：patch 文件写入后，长驻 surface（web GUI）会热重载 profile 补丁层；
- * 若模型选择器里的 effort 面板没有立刻出现，重开 profile / 重启 dsh 即生效。
+ * 生效方式：写入走宿主的 `ctx.configEditor.edit()`，它会在同一个调用里调和 Loader
+ * （reconcileProfilePatches），所以模型选择器里的 effort 面板通常立刻出现；
+ * 若没有，重开 profile / 重启 dsh 即生效。
  *
  * 功能二：按模型记住思考强度
  * ---------------------------------------------------------------------
@@ -52,15 +53,16 @@
  * profile 定位：优先 `DSH_PROFILE_DIR` → `DSH_HOME`+`DSH_PROFILE` → 兜底扫描
  * `$DSH_HOME/profiles/*` 找装了本插件的目录（多个时取 patch 文件最新改动的）。
  *
- * YAML 解析用 profile 共享 store 里的 `yaml`（先裸导入，失败则回退到
- * `$DSH_HOME/profiles/node_modules/yaml/dist/index.js` 以文件 URL 导入），
- * 用 parseDocument 保护注释与排版，只改动目标模型的条目。
+ * 配置读写不再自己解析 YAML —— Desktop 只装桌面版时，插件根本 import 不到 `yaml`
+ * （profile 的 node_modules 只放 profile 安装的 bundle，里面的 yaml 软链还可能指向
+ * 已经删掉的 CLI 安装）。改走宿主自己的 `ctx.configEditor` 服务：由它加锁、写 profile
+ * 补丁层、调和 Loader 热重载。代价是 llm-pi-ai 那一行会由宿主重新序列化（文件里其余
+ * 行与注释不受影响）。
  */
 
 import { existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 /** 稳定的 cordis 插件名（= entry id）。 */
 export const name = 'dsh-thinking-strength'
@@ -113,7 +115,7 @@ function resolveProfileDir() {
       if (!entry.isDirectory()) continue
       const dir = join(profilesRoot, entry.name)
       const marker = join(dir, 'node_modules', 'dsh-thinking-strength')
-      const patch = join(dir, 'cordis.patch.yml')
+      const patch = patchFileOf(dir)
       if (!existsSync(marker) || !existsSync(patch)) continue
       const rec = { dir, patchMtime: statSync(patch).mtimeMs }
       if (best === null || rec.patchMtime > best.patchMtime) best = rec
@@ -139,70 +141,43 @@ function writeFileAtomic(file, content) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* yaml 解析（双路导入，注释与排版由 parseDocument 保留）                          */
+/* profile 配置：交给宿主的 configEditor 服务                                    */
 /* -------------------------------------------------------------------------- */
 
-let yamlPromise = null
-
-async function loadYamlModule() {
+/**
+ * 宿主的 profile 配置编辑器（`config-editor` 插件提供）。没有它（没挂 profile
+ * 配置层）时返回 undefined，由调用方报错。
+ */
+function configEditorOf(ctx) {
   try {
-    return await import('yaml')
-  } catch { /* 运行时的解析器可能够不到共享 store，走下面的绝对路径 */ }
-  const candidates = [
-    join(dshHome(), 'profiles', 'node_modules', 'yaml', 'dist', 'index.js'),
-    (() => {
-      const dir = resolveProfileDir()
-      return dir ? join(dirname(dir), 'node_modules', 'yaml', 'dist', 'index.js') : ''
-    })()
-  ]
-  for (const candidate of candidates) {
-    if (candidate.length > 0 && existsSync(candidate)) {
-      return await import(pathToFileURL(candidate).href)
-    }
+    return ctx.get('configEditor')
+  } catch {
+    return undefined
   }
-  throw new Error('找不到可用的 yaml 库（$DSH_HOME/profiles/node_modules/yaml/dist/index.js）')
 }
 
-function yamlModule() {
-  yamlPromise ??= loadYamlModule()
-  return yamlPromise
-}
-
-/* -------------------------------------------------------------------------- */
-/* cordis.patch.yml 里的定位与编辑                                               */
-/* -------------------------------------------------------------------------- */
-
-/** 顶层数组里 llm-pi-ai 条目的下标；找不到返回 -1。 */
-function llmEntryIndex(doc) {
-  const seq = doc.contents
-  if (!seq || !Array.isArray(seq.items)) return -1
-  for (let i = 0; i < seq.items.length; i++) {
-    const id = seq.items[i]?.get?.('id')
-    const nm = seq.items[i]?.get?.('name')
-    if (id === 'llm-pi-ai' || nm === '@deepseek-ai/dsh-llm-pi-ai') return i
+/** profile 插件树里的 llm-pi-ai 条目：provider / model 配置就写在它的 config 里。 */
+function llmEntryOf(editor) {
+  try {
+    return editor.entries().find(entry =>
+      entry?.options?.id === 'llm-pi-ai' || entry?.options?.name === '@deepseek-ai/dsh-llm-pi-ai')
+  } catch {
+    return undefined
   }
-  return -1
 }
 
 /**
- * 定位 llm-pi-ai 配置里 (provider, model) 对应的 models 序列下标。
- * 返回 { ok, base?, why? }；base 是直达该模型条目的路径数组。
+ * 在 llm-pi-ai 的 config（跨层合成后的原始形态）里定位 (provider, model) 的模型条目。
+ * @returns `{ ok: true, target }` 或 `{ ok: false, why }`。
  */
-function modelEntryPath(doc, entryIndex, provider, model) {
-  const config = doc.getIn([entryIndex, 'config'])
-  if (!config || typeof config.get !== 'function') return { ok: false, why: 'llm-pi-ai 条目没有 config' }
-  const providers = config.get('providers')
-  if (!providers || typeof providers.get !== 'function') return { ok: false, why: 'llm-pi-ai config 里没有 providers' }
-  const route = providers.get(provider)
-  if (!route || typeof route.get !== 'function') return { ok: false, why: `provider "${provider}" 未配置` }
-  const models = route.get('models')
-  if (!models || !Array.isArray(models.items)) return { ok: false, why: `provider "${provider}" 没有 models 列表` }
-  for (let j = 0; j < models.items.length; j++) {
-    if (models.items[j]?.get?.('id') === model) {
-      return { ok: true, base: [entryIndex, 'config', 'providers', provider, 'models', j] }
-    }
-  }
-  return { ok: false, why: `模型 "${model}" 未在 llm-pi-ai 的 ${provider}.models 中找到` }
+function locateModel(config, provider, model) {
+  const route = config?.providers?.[provider]
+  if (route === null || typeof route !== 'object') return { ok: false, why: `provider "${provider}" 未在 llm-pi-ai 里配置` }
+  const models = route.models
+  if (!Array.isArray(models)) return { ok: false, why: `provider "${provider}" 没有 models 列表` }
+  const target = models.find(item => item?.id === model)
+  if (target === undefined) return { ok: false, why: `模型 "${model}" 未在 llm-pi-ai 的 ${provider}.models 中找到` }
+  return { ok: true, target }
 }
 
 /** 当前模型（浏览器半边投影为空时的回退）。 */
@@ -454,7 +429,7 @@ function applyRoutes(ctx) {
   ctx.inject(['connection'], (scoped) => {
     const conn = scoped.connection
 
-    /** 读状态：当前模型有没有声明 reasoningEfforts（每次回读文件）。 */
+    /** 读状态：当前模型有没有声明 reasoningEfforts（每次回读宿主里的实时配置）。 */
     const handleState = async (request) => {
       try {
         const params = queryParamsOf(request)
@@ -465,15 +440,14 @@ function applyRoutes(ctx) {
           provider = def?.provider ?? ''
           model = def?.model ?? ''
         }
-        const profileDir = resolveProfileDir()
-        if (!profileDir) throw new Error('定位不到 profile 目录（DSH_PROFILE_DIR / DSH_PROFILE 未设置，也没扫到装着本插件的 profile）')
-        const file = patchFileOf(profileDir)
-        const { parseDocument } = await yamlModule()
-        const doc = parseDocument(readFileSync(file, 'utf8'))
-        const entry = llmEntryIndex(doc)
-        const located = entry >= 0 && provider && model ? modelEntryPath(doc, entry, provider, model) : { ok: false }
-        const has = !!(located.ok && doc.getIn([...located.base, 'reasoningEfforts']) !== undefined)
-        return json({ ok: true, provider, model, has, profile: basename(profileDir), patch: file })
+        const editor = configEditorOf(ctx)
+        if (editor === undefined) throw new Error('宿主的 configEditor 服务不可用（当前 profile 没挂 profile 配置层）')
+        const entry = llmEntryOf(editor)
+        if (entry === undefined) return json({ ok: false, error: 'llm-pi-ai 不在当前 profile 的插件树里' }, 404)
+        const patch = editor.documentPath
+        const located = provider && model ? locateModel(entry.options?.config ?? {}, provider, model) : { ok: false }
+        const has = !!(located.ok && located.target.reasoningEfforts !== undefined)
+        return json({ ok: true, provider, model, has, profile: basename(dirname(patch)), patch })
       } catch (error) {
         return json({ ok: false, error: reasonOf(error) }, 500)
       }
@@ -493,28 +467,34 @@ function applyRoutes(ctx) {
         const enabled = body?.enabled === true
         if (!provider || !model) return json({ ok: false, error: '缺少 provider / model' }, 400)
 
-        const profileDir = resolveProfileDir()
-        if (!profileDir) throw new Error('定位不到 profile 目录（DSH_PROFILE_DIR / DSH_PROFILE 未设置，也没扫到装着本插件的 profile）')
-        const file = patchFileOf(profileDir)
-        if (!existsSync(file)) throw new Error(`profile 补丁文件不存在：${file}`)
+        const editor = configEditorOf(ctx)
+        if (editor === undefined) throw new Error('宿主的 configEditor 服务不可用（当前 profile 没挂 profile 配置层）')
+        const entry = llmEntryOf(editor)
+        if (entry === undefined) return json({ ok: false, error: 'llm-pi-ai 不在当前 profile 的插件树里' }, 404)
+        const patch = editor.documentPath
 
-        const { parseDocument } = await yamlModule()
-        const doc = parseDocument(readFileSync(file, 'utf8'))
-        const entry = llmEntryIndex(doc)
-        if (entry < 0) return json({ ok: false, error: 'llm-pi-ai 未在 profile 的 cordis.patch.yml 中找到' }, 404)
-        const located = modelEntryPath(doc, entry, provider, model)
-        if (!located.ok) return json({ ok: false, error: located.why }, 404)
-
-        if (enabled) {
-          doc.setIn([...located.base, 'reasoningEfforts'], DEFAULT_EFFORTS)
-        } else {
-          doc.deleteIn([...located.base, 'reasoningEfforts'])
+        const before = locateModel(entry.options?.config ?? {}, provider, model)
+        if (!before.ok) return json({ ok: false, error: before.why }, 404)
+        // 已经是目标状态就别写盘了：edit 会把 llm-pi-ai 那一行重新序列化，没必要白改一次排版。
+        if ((before.target.reasoningEfforts !== undefined) === enabled) {
+          if (!enabled) forgetEffort(routeKey(provider, model))
+          return json({ ok: true, provider, model, enabled, changed: false, profile: basename(dirname(patch)), patch })
         }
-        writeFileAtomic(file, doc.toString({ lineWidth: 0 }))
-        console.error(`${TAG} ${enabled ? '已补全' : '已删除'} reasoningEfforts：${provider} / ${model} -> ${file}`)
+
+        // edit 会加锁、重新读盘、校验（丢给 llm-pi-ai 自己的 Config）、写文件并调和 Loader 热重载。
+        // change 里抛错 = 整次编辑失败，磁盘上不会留下半成品。
+        await editor.edit(entry, (current) => {
+          const config = current ?? {}
+          const located = locateModel(config, provider, model)
+          if (!located.ok) throw new Error(located.why)
+          if (enabled) located.target.reasoningEfforts = { ...DEFAULT_EFFORTS }
+          else delete located.target.reasoningEfforts
+          return config
+        })
+        console.error(`${TAG} ${enabled ? '已补全' : '已删除'} reasoningEfforts：${provider} / ${model} -> ${patch}`)
         // 取消声明后，该模型的档位已不可用，记忆也没意义了。
         if (!enabled) forgetEffort(routeKey(provider, model))
-        return json({ ok: true, provider, model, enabled, profile: basename(profileDir), patch: file })
+        return json({ ok: true, provider, model, enabled, changed: true, profile: basename(dirname(patch)), patch })
       } catch (error) {
         return json({ ok: false, error: reasonOf(error) }, 500)
       }
@@ -534,8 +514,9 @@ function applyRoutes(ctx) {
       }
     }
 
-    const dir = resolveProfileDir()
-    console.error(`${TAG} patch = ${dir ? patchFileOf(dir) : '（profile 目录未定位到）'}`)
+    const editor = configEditorOf(ctx)
+    const llm = editor === undefined ? undefined : llmEntryOf(editor)
+    console.error(`${TAG} patch = ${editor?.documentPath ?? '（configEditor 不可用）'}${llm === undefined ? '，llm-pi-ai 条目未找到' : ''}`)
   })
 }
 

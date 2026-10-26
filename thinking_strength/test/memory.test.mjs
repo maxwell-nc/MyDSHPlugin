@@ -1,18 +1,16 @@
 /**
  * 回归测试：用假的 cordis 上下文驱动 dsh-thinking-strength 的 host 半边，
- * 验证「按模型记住思考强度」的判定与回放逻辑。
+ * 验证「按模型记住思考强度」的判定/回放，以及勾选框走 configEditor 的读写。
  *
  *   node test/memory.test.mjs
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const PLUGIN = join(import.meta.dirname, '..', 'thinking-strength.mjs')
 const ROOT = mkdtempSync(join(tmpdir(), 'dsh-thinking-strength-test-'))
-// yaml 库要从 profile 共享 store 回退导入，所以 DSH_HOME 必须指向真实的 ~/.dsh。
-process.env.DSH_HOME ||= join(homedir(), '.dsh')
 
 let failures = 0
 let caseNo = 0
@@ -24,22 +22,42 @@ function ok(label, condition, extra) {
 
 const tick = () => new Promise((resolve) => { setTimeout(resolve, 5) })
 
-/** 起一个插件实例（每个用例一个全新模块实例 + 全新 profile 目录）。 */
-async function boot({ defaultModel = null, memoryFile = null, patchFile = null } = {}) {
+/**
+ * 起一个插件实例（每个用例一个全新模块实例 + 全新 profile 目录）。
+ *
+ * @param config   llm-pi-ai 的 config（跨层合成后的原始形态）；null = 没有 config 字段
+ * @param noEditor 不提供 configEditor 服务，用来验「桌面版没挂 profile 配置层」的报错
+ */
+async function boot({ defaultModel = null, memoryFile = null, config = null, noEditor = false } = {}) {
   caseNo++
   const profileDir = join(ROOT, `profile-${caseNo}`)
   mkdirSync(profileDir, { recursive: true })
+  process.env.DSH_PROFILE_DIR = profileDir
   if (memoryFile !== null) {
     writeFileSync(join(profileDir, 'dsh-thinking-strength.efforts.json'), JSON.stringify(memoryFile, null, 2))
   }
-  if (patchFile !== null) writeFileSync(join(profileDir, 'cordis.patch.yml'), patchFile)
-  process.env.DSH_PROFILE_DIR = profileDir
-  // DSH_HOME 保持真实值：yaml 库要从 profile 共享 store 里回退导入。
 
+  const patchPath = join(profileDir, 'cordis.patch.yml')
   const listeners = new Map()
   const routes = []
   const selectCalls = []
+  const editCalls = []
   const effortFile = join(profileDir, 'dsh-thinking-strength.efforts.json')
+
+  /** configEditor 的替身：config 是「当前生效配置」，edit 回调返回什么就落什么。 */
+  let liveConfig = config === null ? undefined : structuredClone(config)
+  const editor = noEditor ? undefined : {
+    documentPath: patchPath,
+    entries: () => [{ options: { id: 'llm-pi-ai', name: '@deepseek-ai/dsh-llm-pi-ai', config: liveConfig } }],
+    edit: async (entry, change) => {
+      const next = change(structuredClone(liveConfig), {})
+      if (next === undefined || typeof next !== 'object') throw new Error('change 必须返回完整 config')
+      editCalls.push(structuredClone(next))
+      liveConfig = structuredClone(next)
+      // 宿主把这一行重新序列化后落盘（真实实现保留文件其余部分，这里只模拟这一行）。
+      writeFileSync(patchPath, `- id: llm-pi-ai\n  config: ${JSON.stringify(liveConfig, null, 2)}\n`)
+    },
+  }
 
   /** selectModel 的替身：记录调用，并按真实行为追加一条 model/selection 事件。 */
   const selectModelImpl = async (request) => {
@@ -83,9 +101,8 @@ async function boot({ defaultModel = null, memoryFile = null, patchFile = null }
 
   const ctx = {
     get(key) {
-      if (key === 'agentDefaultModel') {
-        return { currentSelection: () => defaultModel }
-      }
+      if (key === 'agentDefaultModel') return { currentSelection: () => defaultModel }
+      if (key === 'configEditor') return editor
       return undefined
     },
     inject(services, callback) {
@@ -107,8 +124,21 @@ async function boot({ defaultModel = null, memoryFile = null, patchFile = null }
   module.apply(ctx)
   await tick()
 
+  const routeOf = (suffix) => routes.find((route) => route.path.endsWith(suffix.split('?')[0]))
+  const post = async (suffix, body) => {
+    const response = await routeOf(suffix).fetch(new Request(`http://localhost/api/dsh-thinking-strength${suffix}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      ...body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    }))
+    return { status: response.status, body: await response.json() }
+  }
+
   return {
-    append, sessionOf, selectCalls, routes, effortFile, profileDir,
+    append, sessionOf, selectCalls, editCalls, routes, effortFile, profileDir, patchPath,
+    liveConfig: () => liveConfig,
+    get: (suffix, query = '') => post(`${suffix}${query}`, undefined),
+    set: (body) => post('.set', body),
+    patchText: () => { try { return readFileSync(patchPath, 'utf8') } catch { return '' } },
     setFailure: (fn) => { failWith = fn },
     readMemory: () => (() => {
       try { return JSON.parse(readFileSync(effortFile, 'utf8')) } catch { return null }
@@ -202,35 +232,82 @@ console.log('用例 7：回放前路由已被切走 → 放弃')
   ok('放弃回放', b.selectCalls.length === 0, b.selectCalls)
 }
 
-console.log('用例 8：勾选框取消声明 → 顺手清掉该模型记忆（走 /api）')
+/* -------------------------------------------------------------------------- */
+const PILOT = {
+  providers: {
+    merge: {
+      displayName: 'merge',
+      baseURL: 'http://127.0.0.1:10802/v1',
+      models: [
+        { id: 'A', name: 'A', reasoningEfforts: { off: null, high: 'high' } },
+        { id: 'B', name: 'B' },
+      ],
+    },
+  },
+}
+
+console.log('用例 8：取消勾选 → 走 configEditor 删掉 reasoningEfforts，并清掉该模型记忆')
 {
-  const patch = [
-    '- id: llm-pi-ai',
-    '  name: "@deepseek-ai/dsh-llm-pi-ai"',
-    '  config:',
-    '    providers:',
-    '      merge:',
-    '        models:',
-    '          - id: A',
-    '            reasoningEfforts:',
-    '              off: null',
-    '              high: high',
-    '',
-  ].join('\n')
   const b = await boot({
     memoryFile: { version: 1, providers: { merge: { A: 'high', B: 'low' } } },
-    patchFile: patch,
+    config: PILOT,
   })
-  const setRoute = b.routes.find((route) => route.path.endsWith('.set'))
-  const response = await setRoute.fetch(new Request('http://localhost/api/dsh-thinking-strength.set', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ provider: 'merge', model: 'A', enabled: false }),
-  }))
-  const body = await response.json()
-  ok('接口成功', body.ok === true, body)
+  const state = await b.get('.state', '?provider=merge&model=A')
+  ok('state 读到 has=true', state.body.ok === true && state.body.has === true, state.body)
+  ok('state 回的是当前 profile 的 patch', state.body.patch === b.patchPath && state.body.profile === basename(b.profileDir), state.body)
+
+  const res = await b.set({ provider: 'merge', model: 'A', enabled: false })
+  ok('接口成功且 changed=true', res.body.ok === true && res.body.changed === true, res.body)
+  ok('写到 llm-pi-ai 那一行', b.patchText().includes('llm-pi-ai'), b.patchText())
+  ok('reasoningEfforts 已删', b.liveConfig().providers.merge.models[0].reasoningEfforts === undefined, b.liveConfig())
+  ok('同 provider 的其它模型没被动过', b.liveConfig().providers.merge.models[1].id === 'B', b.liveConfig())
+  ok('baseURL 等字段保留', b.liveConfig().providers.merge.baseURL === 'http://127.0.0.1:10802/v1', b.liveConfig())
+  ok('edit 收到的是完整 config', b.editCalls.length === 1 && b.editCalls[0].providers.merge.displayName === 'merge', b.editCalls)
   ok('记忆已清 A、保留 B', b.readMemory()?.providers?.merge?.A === undefined && b.readMemory()?.providers?.merge?.B === 'low', b.readMemory())
-  ok('patch 里 reasoningEfforts 已删', !readFileSync(join(b.profileDir, 'cordis.patch.yml'), 'utf8').includes('reasoningEfforts'))
+}
+
+console.log('用例 9：勾选 → 补全默认档位并写盘')
+{
+  const b = await boot({ config: PILOT })
+  const res = await b.set({ provider: 'merge', model: 'B', enabled: true })
+  ok('接口成功', res.body.ok === true && res.body.changed === true, res.body)
+  ok('补全 off/low/high/max', JSON.stringify(b.liveConfig().providers.merge.models[1].reasoningEfforts)
+    === JSON.stringify({ off: null, low: 'low', high: 'high', max: 'max' }), b.liveConfig().providers.merge.models[1])
+  const state = await b.get('.state', '?provider=merge&model=B')
+  ok('再读 state = has=true', state.body.has === true, state.body)
+}
+
+console.log('用例 10：已经是目标状态 → 不写盘（不白改排版）')
+{
+  const b = await boot({ config: PILOT })
+  const before = structuredClone(b.liveConfig())
+  const off = await b.set({ provider: 'merge', model: 'B', enabled: false })   // B 本来就没声明
+  ok('changed=false', off.body.ok === true && off.body.changed === false, off.body)
+  const on = await b.set({ provider: 'merge', model: 'A', enabled: true })    // A 本来就声明了
+  ok('changed=false（已声明）', on.body.ok === true && on.body.changed === false, on.body)
+  ok('一次都没调 edit', b.editCalls.length === 0, b.editCalls)
+  ok('配置没变', JSON.stringify(b.liveConfig()) === JSON.stringify(before), b.liveConfig())
+}
+
+console.log('用例 11：模型/provider 不在 llm-pi-ai 里 → 404 且不动配置')
+{
+  const b = await boot({ config: PILOT })
+  const missingModel = await b.set({ provider: 'merge', model: 'Z', enabled: true })
+  ok('未知模型 404', missingModel.status === 404 && /未在 llm-pi-ai/.test(missingModel.body.error ?? ''), missingModel.body)
+  const missingProvider = await b.set({ provider: 'nope', model: 'A', enabled: true })
+  ok('未知 provider 404', missingProvider.status === 404, missingProvider.body)
+  ok('没有产生任何写入', b.editCalls.length === 0, b.editCalls)
+  const state = await b.get('.state', '?provider=merge&model=Z')
+  ok('state 对未知模型返回 has=false（不报错）', state.body.ok === true && state.body.has === false, state.body)
+}
+
+console.log('用例 12：没有 configEditor（例如没挂 profile 配置层）→ 报清楚，不崩')
+{
+  const b = await boot({ noEditor: true })
+  const state = await b.get('.state', '?provider=merge&model=A')
+  ok('state 报 500 + 可读原因', state.status === 500 && /configEditor/.test(state.body.error ?? ''), state.body)
+  const res = await b.set({ provider: 'merge', model: 'A', enabled: true })
+  ok('set 报 500 + 可读原因', res.status === 500 && /configEditor/.test(res.body.error ?? ''), res.body)
 }
 
 console.log(failures === 0 ? '\n全部通过' : `\n${failures} 项失败`)

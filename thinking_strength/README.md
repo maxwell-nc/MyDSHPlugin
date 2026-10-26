@@ -33,6 +33,13 @@ DSH 的 llm 校验层（`resolveCallWithInfo`）只接受**模型目录声明过
 所以这个勾选框 =「让 DSH 认账这个模型能思考 + 打开内置档位入口」。勾完之后，具体强度
 （off / low / high / max）在内置的模型选择器 effort 面板里选即可。
 
+写入不自己解析 YAML，而是走**宿主自己的 `ctx.configEditor` 服务**（`config-editor` 插件）：
+
+- 由它加锁、重新读盘、按 llm-pi-ai 自己的 Config 校验、写 profile 补丁层、调和 Loader 热重载；
+- 只重写 llm-pi-ai 那一行（该行会被重新序列化，行内注释会给格式化掉），文件里其余行与注释原样保留；
+- 所以**只装桌面版、没装 CLI 也能用** —— 插件不需要 `yaml` 库（profile 的 `node_modules` 里只有
+  profile 安装的 bundle，其中 `yaml` 软链还可能指向已经删掉的 CLI 安装）。
+
 ## 二、按模型记住思考强度
 
 ### 为什么需要它
@@ -101,39 +108,38 @@ DSH 核心没有「每模型记住档位」的概念：
 **宿主半边**（`thinking-strength.mjs`）：
 
 - 定位 profile：优先 `DSH_PROFILE_DIR` → `DSH_HOME` + `DSH_PROFILE` → 兜底扫描
-  `$DSH_HOME/profiles/*` 找装了本插件的目录。
-- 勾选框读写目标：`<profile>/cordis.patch.yml` 里 llm-pi-ai 条目的
-  `config.providers.<provider>.models[].reasoningEfforts`。
-- YAML 用 profile 共享 store 里的 `yaml`（`parseDocument`），改目标模型那一段时
-  **保留其它注释与排版**；写文件走「临时文件 + rename」。
+  `$DSH_HOME/profiles/*` 找装了本插件的目录（只用于记忆表；配置读写交给 `configEditor`）。
+- 勾选框读写目标：llm-pi-ai 条目的 `config.providers.<provider>.models[].reasoningEfforts`，
+  经宿主的 `ctx.configEditor`（`entries()` 找条目、`edit()` 落盘并热重载）。
 - 补全的默认档位：`{ off: null, low: low, high: high, max: max }`
   （`off` 不传参 = 上游默认不开思考，其余档位直发 wire 值）。
+- 已经是目标状态时不写盘（不白改一次排版）。
 - 记忆表与回放：`session/event`（只看 `model/selection`）+ `sessionController.selectModel`。
 
 **网页半边**（`lib/client.js`）是输入框里的勾选框，走两个 /api：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/dsh-thinking-strength.state?provider=&model=` | `{ok, provider, model, has}` |
-| POST | `/api/dsh-thinking-strength.set` | `{provider, model, enabled}` 补全 / 删除 |
+| GET | `/api/dsh-thinking-strength.state?provider=&model=` | `{ok, provider, model, has, profile, patch}` |
+| POST | `/api/dsh-thinking-strength.set` | `{provider, model, enabled}` 补全 / 删除，回 `{ok, changed, ...}` |
 
-切换模型时勾选框自动回读、状态按模型独立；出错（模型不在 llm-pi-ai 配置里等）会在
-勾选框的 tooltip 里显示具体原因。
+切换模型时勾选框自动回读、状态按模型独立；出错（模型不在 llm-pi-ai 配置里、`configEditor`
+不可用等）会在勾选框的 tooltip 里显示具体原因。
 
 ## 生效时机
 
-patch 文件写入后，长驻 surface（web GUI）会热重载 profile 补丁层。若模型选择器里的
-effort 面板没有**立刻**出现，重开 profile / 重启 dsh 即生效。
+写入走 `configEditor.edit()`，它在同一个调用里就调和了 Loader，所以模型选择器里的 effort
+面板通常**立刻**出现。若没有，重开 profile / 重启 dsh 即生效。
 
-宿主半边的代码改动（不是 patch 文件）需要重载 profile / 重启 dsh 才生效。
+宿主半边的代码改动（不是配置改动）需要重载 profile / 重启 dsh 才生效。
 
 ## 文件
 
 - `package.json` —— 组合包清单：`dsh.bundle.patch`、`dsh.client`、`peerDependencies`
 - `cordis.patch.yml` —— 补丁片段：把宿主半边插进 profile 插件树（`name` 裸包标识符）
-- `thinking-strength.mjs` —— 宿主半边（profile 定位 + patch 编辑 + 记忆表 + 回放 + /api）
+- `thinking-strength.mjs` —— 宿主半边（profile 定位 + configEditor 读写 + 记忆表 + 回放 + /api）
 - `lib/client.js` —— 网页半边（输入框里的勾选框）
-- `test/memory.test.mjs` —— 记忆表判定 / 回放的回归测试（`pnpm test`）
+- `test/memory.test.mjs` —— 记忆表判定 / 回放 / 勾选框读写的回归测试（`pnpm test`）
 - `locale/zh.json`、`locale/en.json` —— 组合包列表里的标题 / 简介
 
 ## 安装
@@ -160,5 +166,9 @@ DSH 会把插件行强制停用）。
 ## 边界
 
 - 只修改 llm-pi-ai 配置里「已存在的模型条目」；模型不在配置里会报错并保持不变。
+- 需要 profile 挂着 `config-editor`（`ctx.configEditor`）。没有它时勾选框会显示
+  「宿主的 configEditor 服务不可用」而不是静默失败。
+- 若 llm-pi-ai 的配置被更上层（home patch / 命令行覆盖 / settings 文档）压住，
+  `configEditor.edit()` 会拒绝写入并把原因回给 tooltip，磁盘上不会留下半成品。
 - 取消勾选是删除 `reasoningEfforts` 字段（包括原来是 `false` 的情况）。
 - 任何异常都吞掉 / 通过响应里的 `error` 返回，插件崩了不连带 dsh 起不来。
