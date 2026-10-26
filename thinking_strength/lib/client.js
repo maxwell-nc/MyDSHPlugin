@@ -22,6 +22,12 @@ window.__ModuleLoader__.load({
 			".dts-model-row:hover{background:#f2f5fb}" +
 			".dts-model-row.dts-active{color:#4176E6;font-weight:600}" +
 			".dts-model-row:disabled{opacity:.5;cursor:default}" +
+			".dts-row{display:flex;align-items:center;gap:10px;min-width:0}" +
+			".dts-row-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+			".dts-star{flex:none;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:15px;line-height:1;color:#e6eaf1;cursor:pointer;opacity:0;border:none;background:none;padding:0;transition:none}" +
+			".dts-star:hover{opacity:1;color:#c6cdd9}" +
+			".dts-star.dts-star-on{opacity:1;color:#f4c531}" +
+			".dts-star.dts-star-on:hover{color:#ffd75e}" +
 			".dts-empty{padding:10px 8px;font-size:12px;color:var(--dsw-alias-label-secondary,#5b6478)}" +
 			".dts-slider{display:inline-flex;align-items:center;gap:6px}" +
 			".dts-track{position:relative;display:flex;align-items:center;justify-content:space-between;padding:2px;width:96px;height:22px;border-radius:999px;background:var(--dsw-alias-bg-layer-2,#edf0f5);border:1px solid var(--dsw-alias-border-l1,#d6dbe3);cursor:pointer;touch-action:none;box-sizing:border-box;transition:none}" +
@@ -64,6 +70,8 @@ window.__ModuleLoader__.load({
 		const LIST_HEIGHT = 340;
 		/** 本页已确保过完整 5 档声明的模型（provider\0model）：避免每次点击都重写配置。 */
 		const ensuredKeys = new Set();
+		/** 本地收藏（星标）模型，持久化键。 */
+		const FAV_KEY = "dsh-thinking-strength:favs";
 
 		/** 只保留斜杠后的短名：opencode/glm-5.3 → glm-5.3。 */
 		function shortName(id) {
@@ -120,6 +128,19 @@ window.__ModuleLoader__.load({
 			const [busy, setBusy] = react.useState(false);
 			const [error, setError] = react.useState(null);
 			const [hover, setHover] = react.useState(null);
+			const [favs, setFavs] = react.useState(() => {
+				try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || "[]")); }
+				catch { return new Set(); }
+			});
+			const toggleFav = (provider, model) => {
+				setFavs((prev) => {
+					const next = new Set(prev);
+					const key = provider + "\u0000" + model;
+					if (next.has(key)) next.delete(key); else next.add(key);
+					try { localStorage.setItem(FAV_KEY, JSON.stringify([...next])); } catch { /* 忽略 */ }
+					return next;
+				});
+			};
 			const [dragging, setDragging] = react.useState(false);
 			const btnRef = react.useRef(null);
 			const listRef = react.useRef(null);
@@ -303,13 +324,24 @@ window.__ModuleLoader__.load({
 					rows.push(h("div", { key: "g:" + group.id + "/" + (prefix ?? ""), className: "dts-group-head" }, capLabel(heading)));
 					for (const model of models) {
 						const active = current !== null && current.provider === group.id && current.model === model.id;
+						const label = cap(prefix === null ? (model.name || model.id) : splitPrefix(model.id).base);
+						const fav = favs.has(group.id + "\u0000" + model.id);
 						rows.push(h("button", {
 							key: group.id + "/" + model.id,
 							type: "button",
 							className: "dts-model-row" + (active ? " dts-active" : ""),
 							disabled: pending !== null && !active,
 							onClick: () => pick(group.id, model)
-						}, cap(prefix === null ? (model.name || model.id) : splitPrefix(model.id).base)));
+						}, h("span", { className: "dts-row" }, [
+							h("span", { className: "dts-row-label" }, label),
+							h("span", {
+								role: "button",
+								tabIndex: -1,
+								title: (fav ? "取消收藏" : "收藏") + " " + label,
+								className: "dts-star" + (fav ? " dts-star-on" : ""),
+								onClick: (e) => { e.preventDefault(); e.stopPropagation(); toggleFav(group.id, model.id); }
+							}, "★")
+						])));
 					}
 				}
 			}
