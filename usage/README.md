@@ -30,7 +30,9 @@ usage/
 ├── locale/zh.json      # 组合包列表里的中文标题 / 简介
 ├── locale/en.json      # 同上，英文
 ├── usage.mjs           # host 半边：采集 + 读取接口
-└── lib/client.js       # 浏览器半边：入口 + 面板 + 柱状图
+├── lib/client.js       # 浏览器半边：入口 + 面板 + 柱状图 + composer 三格读数
+├── test-record-external.mjs    # 外来上报的自测
+└── test-composer-readings.mjs  # composer 读数的自测
 ```
 
 **账本不在上面这个目录里。** 它放在**应用数据根**下：
@@ -46,6 +48,73 @@ profile `node_modules` 的**安装目录**：账本放包里面，一是装/升�
 
 （本目录下如果还留着 `data/`，那是 1.0.x 时代写在插件目录里的旧账本残留，
 已经搬到上面那个路径，**别再往里写**。）
+
+## composer 下方那排读数（速度 / 消耗 / 上下文）
+
+输入框下方那排状态里核心本来有三句读数，本插件换成我们要的说法：
+
+| 位置 | 核心原本 | 改后 |
+|---|---|---|
+| 输出速度 | `1 轮 80 步 · 39 tok/s` | `1 轮 80 步 · 速度 142 t/s` |
+| 会话用量 | `5.7M tok · 缓存命中 88%` | `消耗 570 万 · 缓存命中 88%` |
+| 上下文占用 | `55%`（环） | `上下文 55%（144K/262K）` |
+
+**做法：按 id 顶掉核心那两格 pill，自己用 React 画。** `conversation.composer.dock`
+是 list 槽，核心的 `activity` / `usage` 各占一个 cell；同 id 再给个**更低的
+`priority`（-1）** 就顶掉它（规则：同一个 cell 里 priority 小的渲染，见 ui-slots
+`entriesOfSlot`）。**全程不往核心 DOM 写一个字、不挂 MutationObserver** —— 上一版是
+「改文本 + observer」，出现过「UI 卡住、后台还在正常跑」，所以整块换掉了。这一版没有
+任何 DOM 副作用，最坏情况是某一格不渲染，不可能把界面拖死。
+
+三个点击面板是**照核心逐条抄的，不是自己编的皮肤**：
+
+- 速度 / 用量两格 = ui-chat 的 `stat-dialog.module.css`：16px 内边距、`width:max-content`
+  且 300~440px 之间、`--dsw-specific-menu` 菜单底 + `--dsw-elevation-prominent` 浮起、
+  12px/18px 字号、标题行（图标 + 标题，右侧精确值）、标题下的 0.5px 分隔线、76px 起的
+  两列网格（6px × 16px）。行文案与取值也照核心：`会话统计` → 模型用时 / 工具调用用时 /
+  首 token 平均（TTFT）/ 输出速度（TPS），耗时用核心中文形态（`3分30秒`）；`Token 用量`
+  → 缓存命中 / 未缓存输入 / 缓存读取 / 缓存写入 / 输出，计数一律 `12,000 tok`，
+  标题右侧是精确总数 `5,710,000 tok`。
+- 上下文那格 = ui-conversation 的 `ContextMeter.module.css` 面板：264px 宽、12px 内边距、
+  12px/20px 字号、标题行 `上下文已用 55%` + 右侧 `~144K / 262K`、一条按构成占比着色的
+  4px 条（系统提示词 / 工具定义 / 对话消息，颜色用核心那三个 token，含那个紫罗兰字面量）、
+  下面三行带色块的图例 `~12K`。
+- 定位与关闭也照核心的实现：贴 pill 上沿 8px、视口内夹紧 12px（顶部按框架留白
+  `--dsh-frame-top-clearance` 让位），滚动（捕获相）/ 缩放 / 面板自身尺寸变化都会重算；
+  点外（pointerdown 与捕获相 click）和 Escape 关闭。
+
+唯一没照抄的是**速度单位**：面板里那一行也写 `142 t/s`（核心是 `142 tok/s`），跟外面
+那格读数保持一致；想完全照核心把那行改回 `tok/s` 说一声即可。
+
+规则：
+
+- **万是单位、不带小数**：`5,700,000` → `570 万`、`573,000` → `57 万`；够 1 亿改亿、
+  2 位小数、末尾 0 省掉：`120,000,000` → `1.2 亿`、`100,000,000` → `1 亿`。
+  不到 1 万直接给原始 token（`9400`）—— 跟账本那边 `measure()` / `formatAmount`
+  同一套规则，免得出现「消耗 0 万」这种没信息量的读数。
+- 速度的数字照核心规则（≥10 取整，否则 1 位小数），只把 `tok/s` 换成 `速度 … t/s`；
+  前面 `1 轮 80 步` 那段仍是核心口径（`sessionStats` 投影）。
+- 上下文两个数字用核心面板同款紧凑写法：`144K` / `262K`（够 100 不留小数，过百万 `M`）；
+  百分数封顶 100、`projectedTokens` 优先，与核心仪表同式。
+- **三格字号天生一样大**：都取核心 pill 的「次要字号 − 1px」
+  （`calc(var(--dsh-content-font-size-secondary,13px) - 1px)`）。
+
+**上下文那格为什么要藏核心的**：上下文仪表（ContextMeter）**没进槽位**（InputBar 直接
+写在 dock 里），顶不掉，只能用一条静态 CSS 把它隐掉
+（`[data-composer-dock]>span:last-child:not(:has([data-composer-stat])):has(svg)`：
+「dock 的最后一个子节点 + 里面没有我们标记的 `data-composer-stat` + 带那个环」三条同时
+成立才命中。核心结构变了、或本来就没有这格，最坏是不生效、多显示一个 `55%`；而万一
+槽位渲染器在外面包一层 span，那层里面装的是我们自己的三格、会被第二条排除掉，不会
+把整排读数一起藏了）。**这是唯一一处碰核心 DOM 的地方，而且只是 `display:none`。**
+
+已知取舍：
+
+- 核心的「紧凑 / 详细」偏好（`performanceUsage`）是 ui-chat 内部的 observable，插件
+  拿不到，所以三格**恒按详细样式**渲染（紧凑模式本来也只显示更少的字，信息不会变少）。
+- 图标是自画的小 SVG：`@deepseek-ai/dsh-client-ui-primitives` 不在插件的依赖白名单里，
+  形状与粗细照核心那对 14px 图标来。
+- 核心那两个面板组件的皮肤是**抄的**（值一字不改），所以核心哪天改了面板样式，这里不会
+  自动跟着变；换皮肤时要回来对一遍。
 
 ## 装法
 
@@ -279,6 +348,12 @@ host 半边可以喂个假 ctx 直接驱动，**不用起 dsh、不花 token**�
 
 ```bash
 node usage/test-record-external.mjs   # 收下上报监听器，喂视觉 usage，读账本断言
+```
+
+composer 那三格读数的格式化规则、读数文本与注册接线也有独立自测：
+
+```bash
+node usage/test-composer-readings.mjs  # 万/亿/K/M/速度/耗时/命中率 + 三格读数 + 接线
 ```
 
 **真实事件形状**用 headless profile 跑一轮真对话验证（最省事，一条命令跑完即退）：

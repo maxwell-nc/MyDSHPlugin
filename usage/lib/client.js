@@ -97,7 +97,57 @@ window.__ModuleLoader__.load({
 			".dshu-date{height:26px;padding:0 6px;border:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.18));border-radius:7px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,#1b2130);font:inherit;font-size:12px;outline:none;font-variant-numeric:tabular-nums}" +
 			".dshu-date:focus{border-color:var(--dsw-alias-state-business-primary,#3d7eff)}" +
 			".dshu-rangeSep{color:var(--dsw-alias-label-tertiary,#8a93a8);font-size:12px}" +
-			".dshu-rangeNote{font-size:11px;color:var(--dsw-alias-label-tertiary,#8a93a8);font-variant-numeric:tabular-nums}";
+			".dshu-rangeNote{font-size:11px;color:var(--dsw-alias-label-tertiary,#8a93a8);font-variant-numeric:tabular-nums}" +
+			// composer 下方那排读数（dshu-sread*）：我们自己的三格 pill —— 顶掉核心的
+			// activity / usage 两格，再加一格 context。字号统一取核心 pill 的
+			// 「次要字号 − 1px」，所以三格天然一样大；颜色/内边距/分隔符都照核心
+			// StatsPills.module.css 抄，混在一行看不出是谁画的。
+			".dshu-sreadAnchor{display:inline-flex;min-width:0;font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px))}" +
+			".dshu-sreadPill{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;max-width:100%;padding:1px 8px;border:none;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary,#8a93a8);font:inherit;font-variant-numeric:tabular-nums;line-height:inherit;white-space:nowrap}" +
+			".dshu-sreadPill svg{width:14px;height:14px;flex:none}" +
+			"button.dshu-sreadPill{cursor:pointer}" +
+			"button.dshu-sreadPill:hover,button.dshu-sreadPill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-hover,rgba(22,32,58,.06));color:var(--dsw-alias-label-secondary,#5b6478)}" +
+			".dshu-sreadLabel{min-width:0;overflow:hidden;text-overflow:ellipsis}" +
+			".dshu-sreadSep{color:var(--dsw-alias-separator-primary,rgba(22,32,58,.18));margin:0 6px}" +
+			// 面板皮肤：**逐条照抄核心**，不是自己编的。前两格 = ui-chat
+			// `stat-dialog.module.css`（.panel/.title/.titleLabel/.titleValue/.titleRule/.details，
+			// 数值一个不改：16px 内边距、width:max-content、min/max 300~440px、
+			// --dsw-specific-menu 菜单底、--dsw-elevation-prominent 浮起描边、12px/18px 字号、
+			// 76px 起的两列网格 6px×16px）；上下文那格 = ui-conversation
+			// `ContextMeter.module.css` 的面板部分（264px 宽、12px 内边距、12px/20px 字号、
+			// 标题行 + 4px 构成条 + 带色块的图例行）。类名换前缀是因为我们用的是
+			// 注入的 <style>，没法共享核心的 CSS Module 哈希类名。
+			".dshu-sreadPanel{position:fixed;z-index:1100;box-sizing:border-box;width:max-content;min-width:min(300px,calc(100vw - 24px));max-width:min(440px,calc(100vw - 24px));padding:16px;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);cursor:default}" +
+			".dshu-sreadTitle{display:flex;justify-content:space-between;gap:16px;margin-bottom:8px;color:var(--dsw-alias-label-primary);font-weight:500}" +
+			".dshu-sreadTitleLabel{display:inline-flex;align-items:center;gap:6px;min-width:0}" +
+			".dshu-sreadTitleLabel svg{width:14px;height:14px;flex:none}" +
+			".dshu-sreadTitleValue{font-variant-numeric:tabular-nums}" +
+			".dshu-sreadTitleRule{margin-bottom:10px;border-top:0.5px solid var(--dsw-alias-border-l2)}" +
+			".dshu-sreadDetails{display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:6px 16px;margin:0;color:var(--dsw-alias-label-tertiary)}" +
+			".dshu-sreadDetails dt,.dshu-sreadDetails dd{min-width:0;margin:0}" +
+			".dshu-sreadDetails dd{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;text-align:right}" +
+			".dshu-sreadMeter{position:fixed;z-index:1100;box-sizing:border-box;width:min(264px,calc(100vw - 24px));padding:12px;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary);cursor:default}" +
+			".dshu-sreadMeterHead{display:flex;align-items:center;gap:6px}" +
+			".dshu-sreadMeterHeadline{color:var(--dsw-alias-label-tertiary)}" +
+			".dshu-sreadMeterPercent{font-weight:500;color:var(--dsw-alias-label-primary)}" +
+			".dshu-sreadMeterFigures{margin-left:auto;font-weight:500;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary)}" +
+			".dshu-sreadMeterBar{display:flex;gap:1px;margin:10px 0 12px;height:4px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-interactive-bg-hover);overflow:hidden}" +
+			".dshu-sreadMeterSegment{flex:none;min-width:2px;height:100%;border-radius:1px;background:var(--dshu-meter-tint,var(--dsw-alias-label-tertiary))}" +
+			".dshu-sreadMeterSwatch{display:inline-block;margin-right:6px;width:8px;height:8px;border-radius:2px;background:var(--dshu-meter-tint);vertical-align:baseline}" +
+			".dshu-sreadMeterSystem{--dshu-meter-tint:var(--dsw-static-neutral-bluish-400)}" +
+			".dshu-sreadMeterTools{--dshu-meter-tint:rgb(167,139,250)}" +
+			".dshu-sreadMeterMessages{--dshu-meter-tint:var(--dsw-static-blue-450)}" +
+			".dshu-sreadMeterRows{margin:6px 0 0}" +
+			".dshu-sreadMeterRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:2px 0}" +
+			".dshu-sreadMeterRow dt{color:var(--dsw-alias-label-secondary)}" +
+			".dshu-sreadMeterRow dd{margin:0;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary)}" +
+			// 核心的上下文仪表（ContextMeter）**没进槽位**（InputBar 直接写在 dock 里），
+			// 想换掉它只能藏。这条只认「dock 的最后一个子节点 + 里面没有任何我们标记的
+			// data-composer-stat + 带 svg（那个环）」的 span：核心结构变了、或本来就没有
+			// 这格时最坏只是不生效（多显示一个 55%）；而「槽位渲染器包一层 span」这种
+			// 情况下，那层包住的是我们自己的三格，`not(:has([data-composer-stat]))` 会把它
+			// 排除掉，绝不会把整排读数一起藏了。
+			"[data-composer-dock]>span:last-child:not(:has([data-composer-stat])):has(svg){display:none}";
 		const tagId = "dsh-usage/client.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -1111,6 +1161,518 @@ window.__ModuleLoader__.load({
 			);
 		}
 
+		//#region dsh-usage/client/composer-readings.js
+		/**
+		 * composer 下方那排读数换成我们要的说法：
+		 *
+		 *   - 输出速度：`1 轮 80 步 · 39 tok/s` → `1 轮 80 步 · 速度 142 t/s`
+		 *   - 会话用量：`5.7M tok · 缓存命中 88%` → `消耗 570 万 · 缓存命中 88%`
+		 *   - 上下文：`55%` → `上下文 55%（144K/262K）`
+		 *
+		 * **做法：按 id 顶掉核心那两格 pill，自己画。** composer dock 是 list 槽，核心
+		 * 两格分别占 `activity` / `usage` 两个 cell（ui-chat `apply.ts` 注册），同 id、
+		 * **priority 更低**（规则是同一个 cell 里 priority 小的渲染，见 ui-slots
+		 * `entriesOfSlot`）就顶掉它。全程只用 React 和官方席位（`useProjection`），
+		 * **一个字都不往核心 DOM 里写、不挂 MutationObserver**。
+		 *
+		 * 上一版是「改文本 + observer」，用户报「UI 卡住（后台还在正常跑）」，所以整块
+		 * 换掉 —— 这一版没有任何 DOM 副作用，最坏情况是某一格不渲染，不可能把界面拖死。
+		 *
+		 * 取舍（都在 README 里写明了）：
+		 *   - 核心两格自带的点击面板随核心组件一起被顶掉，这里用**同一条 projection**
+		 *     自己画了等价面板（数据来源与核心完全一致）。
+		 *   - 上下文仪表不在槽位里，只能用上面 css 里那条 `:has()` 规则藏掉再自画一格。
+		 *   - 核心的「紧凑 / 详细」偏好（`performanceUsage`）是 ui-chat 内部的 observable，
+		 *     插件拿不到，所以三格**恒按详细样式**渲染（紧凑模式本来也只显示更少的字）。
+		 *   - 图标是自画的小 SVG：`@deepseek-ai/dsh-client-ui-primitives` 不在插件的依赖
+		 *     白名单里，形状与粗细照核心那对 14px 图标来。
+		 */
+		/** `570.00` → `570`；`1.20` → `1.2`。 */
+		function trimTrailingZero(text) {
+			return text.indexOf(".") < 0 ? text : text.replace(/\.?0+$/, "");
+		}
+
+		/**
+		 * 总量读数：**万是最低单位、不带小数**；够 1 亿改亿、保留 2 位小数（末尾 0 省掉）。
+		 * 不到 1 万直接给原始 token（跟账本那边 `measure()` / `formatAmount` 同一套规则，
+		 * 免得出现「消耗 0 万」这种没信息量的读数）。
+		 * @param tokens - token 总数。
+		 * @returns 形如 `570 万` / `1.2 亿` / `9400` 的读数。
+		 */
+		function formatWanReading(tokens) {
+			const amount = measure(tokens);
+			if (amount.unit === "亿") return trimTrailingZero(amount.value.toFixed(2)) + " 亿";
+			if (amount.unit === "万") return String(Math.round(amount.value)) + " 万";
+			return String(amount.value);
+		}
+
+		/** 紧凑 token 数（核心面板同款）：`517` / `12.2K` / `517K` / `1.2M`。 */
+		function formatCompactTokens(value) {
+			const scaled = (candidate) => (candidate >= 100 ? String(Math.round(candidate)) : String(Math.round(candidate * 10) / 10));
+			if (value < 1e3) return String(value);
+			if (value < 1e6) return scaled(value / 1e3) + "K";
+			return scaled(value / 1e6) + "M";
+		}
+
+		/** 精确 token 数（千分位，面板行用）。 */
+		function formatExactTokens(value) {
+			return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+		}
+
+		/** 精确计数读数（核心 `exactCount` 同款：`5,710,000 tok`）。 */
+		function exactCount(value) {
+			return formatExactTokens(value) + " tok";
+		}
+
+		/** 速度读数（核心 `formatTokensPerSecond` 同规则）：≥10 取整，否则 1 位小数。 */
+		function formatTokensPerSecond(tps) {
+			const clamped = Math.max(0, tps);
+			return clamped >= 10 ? String(Math.round(clamped)) : String(Math.round(clamped * 10) / 10);
+		}
+
+		/** 耗时（核心 `formatDuration` 的中文形态，即 `duration.compact*` 文案）：`45.2秒` / `2分42秒`。 */
+		function formatDuration(ms) {
+			const seconds = ms / 1e3;
+			if (seconds < 60) return Math.round(seconds * 10) / 10 + "秒";
+			const whole = Math.round(seconds);
+			return Math.floor(whole / 60) + "分" + (whole % 60) + "秒";
+		}
+
+		/** 提示侧计费输入 = 未缓存输入 + 缓存读 + 缓存写（核心 `billedInputTokens` 同式）。 */
+		function billedInputTokens(usage) {
+			return usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+		}
+
+		/**
+		 * 缓存命中率：整数百分比；部分命中即便四舍五入到 100 也**低报**成 99.9（不谎报满命中）。
+		 * @param usage - tokenUsage 投影值。
+		 * @returns 百分比文本，没有计费输入时 null。
+		 */
+		function cacheHitPercent(usage) {
+			const total = billedInputTokens(usage);
+			if (total <= 0) return null;
+			if (usage.cacheReadTokens >= total) return "100";
+			const rounded = Math.floor((usage.cacheReadTokens * 100 + total / 2) / total);
+			return rounded < 100 ? String(rounded) : "99.9";
+		}
+
+		/**
+		 * 上下文占用（核心 `contextOccupancy` 同式）：`projectedTokens` 优先，缺一不可。
+		 * @param pressure - contextPressure 投影值。
+		 * @returns `{percent, usedTokens, contextWindow}`，任一数字缺失时 null。
+		 */
+		function contextOccupancy(pressure) {
+			const usedTokens = pressure?.projectedTokens ?? pressure?.pressureTokens;
+			if (usedTokens === undefined || pressure?.contextWindow === undefined) return null;
+			return {
+				percent: Math.min(100, Math.round(usedTokens / pressure.contextWindow * 100)),
+				usedTokens,
+				contextWindow: pressure.contextWindow
+			};
+		}
+
+		/** 分隔符与核心 `.sep` 同款：圆点，两侧 6px。 */
+		function joinedReading(first, second) {
+			if (second === null) return first;
+			return [first, h("span", { key: "sep", className: "dshu-sreadSep", "aria-hidden": true }, "\u00b7"), second];
+		}
+
+		/** stat-dialog 皮肤的行：`dt`/`dd` 平铺进 `dl.dshu-sreadDetails`（核心 `.details` 同构）。 */
+		function dialogRows(rows) {
+			const nodes = [];
+			for (const [label, value] of rows) {
+				nodes.push(h("dt", { key: "t" + nodes.length }, label));
+				nodes.push(h("dd", { key: "d" + nodes.length }, value));
+			}
+			return nodes;
+		}
+
+		/** ContextMeter 皮肤的行：`.row` 里一个带色块的 `dt` + 右对齐的 `dd`。 */
+		function meterRows(rows) {
+			return rows.map((row) =>
+				h(
+					"div",
+					{ key: row.label, className: "dshu-sreadMeterRow" },
+					h("dt", null, h("span", { className: "dshu-sreadMeterSwatch " + row.tone, "aria-hidden": true }), row.label),
+					h("dd", null, row.value)
+				)
+			);
+		}
+
+		function iconGauge() {
+			return h(
+				"svg",
+				{ viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", "aria-hidden": true },
+				h("path", { d: "M2.5 12.5a5.5 5.5 0 1 1 11 0" }),
+				h("path", { d: "M8 12.5l3.2-3.6" })
+			);
+		}
+
+		function iconDatabase() {
+			return h(
+				"svg",
+				{ viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", "aria-hidden": true },
+				h("ellipse", { cx: 8, cy: 3.6, rx: 4.8, ry: 1.9 }),
+				h("path", { d: "M3.2 3.6v8.8c0 1.05 2.15 1.9 4.8 1.9s4.8-.85 4.8-1.9V3.6" }),
+				h("path", { d: "M3.2 8c0 1.05 2.15 1.9 4.8 1.9s4.8-.85 4.8-1.9" })
+			);
+		}
+
+		function iconRing() {
+			return h(
+				"svg",
+				{ viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", "aria-hidden": true },
+				h("circle", { cx: 8, cy: 8, r: 5.5 }),
+				h("path", { d: "M8 8V2.5" }),
+				h("path", { d: "M8 8l4.4 3.2" })
+			);
+		}
+
+		/** 面板与 pill 的间距（核心 `PANEL_GAP`）。 */
+		const PANEL_GAP = 8;
+		/** 面板与视口边缘的最小距离（核心 `PANEL_MARGIN`）。 */
+		const PANEL_MARGIN = 12;
+		/** 未定位前的面板：先隐藏着参与布局，量出真实尺寸再落坐标（核心 `MEASURE_STYLE`）。 */
+		const MEASURE_STYLE = { visibility: "hidden", left: "0px", top: "0px" };
+
+		/**
+		 * 顶部留白（核心 `overlayTopMargin`）：桌面框架给标题条留了空间，浮层别钻进去。
+		 * @param min - 自己的最小边距。
+		 * @returns 实际生效的上边距。
+		 */
+		function overlayTopMargin(min) {
+			if (typeof document === "undefined" || typeof getComputedStyle !== "function") return min;
+			const root = document.documentElement;
+			const clearance = Number.parseFloat(getComputedStyle(root).getPropertyValue("--dsh-frame-top-clearance"));
+			if (Number.isNaN(clearance)) return min;
+			return Math.max(min, (root.hasAttribute("data-fullscreen") ? 0 : clearance) + 20);
+		}
+
+		/**
+		 * 面板定位 —— 与 ui-primitives `useAnchoredPosition` 同式（`side: 'top'`、
+		 * `align: 'start'`、gap 8、margin 12）：贴 pill 上沿、左对齐、视口内夹紧，并在
+		 * 滚动（捕获相）/ 缩放 / 面板自身尺寸变化时重算。核心那两格和仪表用的是同一个
+		 * 原语，所以坐标行为一致。
+		 * @param open - 是否展开。
+		 * @param anchorRef - pill 的 ref。
+		 * @param panelRef - 面板的 ref。
+		 * @returns `left`/`top` 内联样式，首帧还没量到尺寸时为 null。
+		 */
+		function useAnchoredPanel(open, anchorRef, panelRef) {
+			const [position, setPosition] = react.useState(null);
+			react.useLayoutEffect(() => {
+				if (!open) {
+					setPosition(null);
+					return undefined;
+				}
+				const place = () => {
+					const rect = anchorRef.current?.getBoundingClientRect();
+					if (rect === undefined) return;
+					const panel = panelRef.current;
+					const width = panel?.offsetWidth ?? 0;
+					const height = panel?.offsetHeight ?? 0;
+					let left = rect.left;
+					let top = rect.top - PANEL_GAP - height;
+					if (width > 0) left = Math.min(Math.max(left, PANEL_MARGIN), window.innerWidth - width - PANEL_MARGIN);
+					if (height > 0) top = Math.min(Math.max(top, overlayTopMargin(PANEL_MARGIN)), window.innerHeight - height - PANEL_MARGIN);
+					setPosition({ left: left + "px", top: top + "px" });
+				};
+				// 首次在同一提交里量：先按 MEASURE_STYLE 布局，这一跑就把真实尺寸夹进视口。
+				place();
+				window.addEventListener("scroll", place, true);
+				window.addEventListener("resize", place);
+				const panel = panelRef.current;
+				let observer = null;
+				if (typeof ResizeObserver !== "undefined" && panel !== null) {
+					observer = new ResizeObserver(place);
+					observer.observe(panel);
+				}
+				return () => {
+					observer?.disconnect();
+					window.removeEventListener("scroll", place, true);
+					window.removeEventListener("resize", place);
+				};
+			}, [open, anchorRef, panelRef]);
+			return position;
+		}
+
+		/**
+		 * 点外 / Escape 关闭 —— 与 ui-primitives `useDismissOnOutsidePointer` 加核心 dialog
+		 * 的键盘、捕获 click 处理一致（键盘激活兄弟 pill 时只发 click 不发 pointerdown，
+		 * 捕获相能让它在兄弟打开前先关掉自己）。
+		 * @param open - 是否展开。
+		 * @param setOpen - 开关 setter。
+		 * @param rootRef - pill 的 ref。
+		 * @param panelRef - 面板的 ref（portal 到 body，也算「里面」）。
+		 */
+		function useDialogDismiss(open, setOpen, rootRef, panelRef) {
+			react.useEffect(() => {
+				if (!open) return undefined;
+				const outside = (event) => {
+					const target = event.target;
+					if (!(target instanceof Node)) return;
+					if (rootRef.current?.contains(target) === true) return;
+					if (panelRef.current?.contains(target) === true) return;
+					setOpen(false);
+				};
+				const onKeyDown = (event) => {
+					if (event.key === "Escape") setOpen(false);
+				};
+				document.addEventListener("pointerdown", outside);
+				document.addEventListener("keydown", onKeyDown);
+				document.addEventListener("click", outside, true);
+				return () => {
+					document.removeEventListener("pointerdown", outside);
+					document.removeEventListener("keydown", onKeyDown);
+					document.removeEventListener("click", outside, true);
+				};
+			}, [open, setOpen, rootRef, panelRef]);
+		}
+
+		/**
+		 * 一格读数：与核心 `PlainPill` / `DialogPill` 同构 —— 有 `panel` 就是按钮 + 面板，
+		 * 否则纯读数。面板分两种皮肤：默认照抄核心 stat-dialog，`meter` 为真时照抄
+		 * ContextMeter 的面板（标题行 + 构成条 + 图例行）。
+		 */
+		function StatReading({ stat, icon, label, ariaLabel, title, titleValue, figures, meter, segments, children }) {
+			const interactive = title !== undefined && title !== null;
+			const [open, setOpen] = react.useState(false);
+			const rootRef = react.useRef(null);
+			const panelRef = react.useRef(null);
+			const position = useAnchoredPanel(open, rootRef, panelRef);
+			useDialogDismiss(open, setOpen, rootRef, panelRef);
+
+			const body = [icon, h("span", { key: "label", className: "dshu-sreadLabel" }, label)];
+			if (!interactive) {
+				return h("span", { className: "dshu-sreadAnchor", "data-composer-stat": stat }, h("span", { className: "dshu-sreadPill" }, body));
+			}
+			return h(
+				"span",
+				{ ref: rootRef, className: "dshu-sreadAnchor", "data-composer-stat": stat },
+				h(
+					"button",
+					{
+						type: "button",
+						className: "dshu-sreadPill",
+						"aria-haspopup": "dialog",
+						"aria-expanded": open,
+						"aria-label": ariaLabel,
+						onClick: () => setOpen(!open)
+					},
+					body
+				),
+				open
+					? react_dom.createPortal(
+							meter === true
+								? h(
+										"div",
+										{ ref: panelRef, className: "dshu-sreadMeter", role: "dialog", "aria-label": title, style: position ?? MEASURE_STYLE },
+										h(
+											"div",
+											{ className: "dshu-sreadMeterHead" },
+											h("span", { className: "dshu-sreadMeterHeadline" }, "上下文已用"),
+											h("span", { className: "dshu-sreadMeterPercent" }, titleValue),
+											h("span", { className: "dshu-sreadMeterFigures" }, figures)
+										),
+										h(
+											"div",
+											{ className: "dshu-sreadMeterBar", "aria-hidden": true },
+											(segments ?? []).map((segment) =>
+												h("div", { key: segment.key, className: segment.tone === undefined ? "dshu-sreadMeterSegment" : "dshu-sreadMeterSegment " + segment.tone, style: { width: segment.width + "%" } })
+											)
+										),
+										h("dl", { className: "dshu-sreadMeterRows" }, children)
+									)
+								: h(
+										"div",
+										{ ref: panelRef, className: "dshu-sreadPanel", role: "dialog", "aria-label": title, style: position ?? MEASURE_STYLE },
+										h(
+											"div",
+											{ className: "dshu-sreadTitle" },
+											h("span", { className: "dshu-sreadTitleLabel" }, icon, title),
+											titleValue !== undefined ? h("span", { className: "dshu-sreadTitleValue" }, titleValue) : null
+										),
+										h("div", { className: "dshu-sreadTitleRule", "aria-hidden": true }),
+										h("dl", { className: "dshu-sreadDetails" }, children)
+									),
+							document.body
+						)
+					: null
+			);
+		}
+
+		/**
+		 * 耗时那一格的读数（纯函数，方便自测）：标签两段 + 面板行。
+		 * @param stats - sessionStats 投影值。
+		 * @returns `{counts, speed, rows}`；速度没有解码工时时为 null。
+		 */
+		function activityReadings(stats) {
+			const counts = stats.turns + " 轮 " + stats.steps + " 步";
+			const speedValue = stats.decodeMs > 0 ? formatTokensPerSecond(stats.decodeTokens / (stats.decodeMs / 1e3)) : null;
+			const speed = speedValue === null ? null : "速度 " + speedValue + " t/s";
+			// 面板行与核心 `ActivityPill` 的 `dl` 逐条对齐（文案取核心中文 locale
+			// `stats.dialog.*`，耗时用 `duration.compact*` 的中文形态）。
+			const rows = [];
+			if (stats.llmMs > 0) rows.push(["模型用时", formatDuration(stats.llmMs)]);
+			if (stats.toolMs > 0) rows.push(["工具调用用时", formatDuration(stats.toolMs)]);
+			if (stats.ttftSteps > 0) rows.push(["首 token 平均（TTFT）", formatDuration(stats.ttftMs / stats.ttftSteps)]);
+			if (speedValue !== null) rows.push(["输出速度（TPS）", speedValue + " t/s"]);
+			return { counts, speed, rows };
+		}
+
+		/**
+		 * 用量那一格的读数（纯函数）：`消耗 570 万` + `缓存命中 88%` + token 分桶面板。
+		 * 面板行与核心 `UsagePill` 的 `dl` 逐条对齐（`message.turnUsage.*` 文案 + `{n} tok`）。
+		 * @param usage - tokenUsage 投影值。
+		 * @returns `{total, totalText, totalExact, hit, hitText, rows}`。
+		 */
+		function usageReadings(usage) {
+			const total = billedInputTokens(usage) + usage.outputTokens;
+			const hit = cacheHitPercent(usage);
+			const rows = [];
+			if (hit !== null) rows.push(["缓存命中", hit + "%"]);
+			rows.push(["未缓存输入", exactCount(usage.uncachedInputTokens)]);
+			rows.push(["缓存读取", exactCount(usage.cacheReadTokens)]);
+			if (usage.cacheWriteTokens !== 0) rows.push(["缓存写入", exactCount(usage.cacheWriteTokens)]);
+			rows.push(["输出", exactCount(usage.outputTokens)]);
+			return {
+				total,
+				totalText: "消耗 " + formatWanReading(total),
+				totalExact: exactCount(total),
+				hit,
+				hitText: hit === null ? null : "缓存命中 " + hit + "%",
+				rows
+			};
+		}
+
+		/**
+		 * 上下文那一格的读数（纯函数）：`上下文 55%（144K/262K）` + 构成面板。
+		 * 面板与核心 ContextMeter 的面板一致：标题行 `上下文已用 55%` + 右侧 `~已用 / 上限`，
+		 * 一条按构成占比着色的 4px 条，下面三行图例（系统提示词 / 工具定义 / 对话消息）。
+		 * 条的**总长度**仍是 provider 给的精确百分比，构成只用来分配里面各段的比例 —— 与核心
+		 * 的算法逐行一致（没有构成投影、或构成为 0 时退化成一条整段）。
+		 * @param pressure - contextPressure 投影值。
+		 * @param breakdown - contextBreakdown 投影值（可以缺失）。
+		 * @returns 读数对象，分子或容量缺失时 null（与核心仪表一致）。
+		 */
+		function contextReadings(pressure, breakdown) {
+			const occupancy = contextOccupancy(pressure);
+			if (occupancy === null) return null;
+			const usedText = formatCompactTokens(occupancy.usedTokens);
+			const capacityText = formatCompactTokens(occupancy.contextWindow);
+			const percent = occupancy.percent;
+			const rows = [];
+			const parts = [];
+			if (breakdown === null || breakdown === undefined) {
+				parts.push({ key: "total", tone: undefined, width: percent });
+			} else {
+				const breakdownTotal = breakdown.systemTokens + breakdown.toolsTokens + breakdown.messageTokens;
+				if (breakdownTotal === 0) {
+					parts.push({ key: "total", tone: undefined, width: percent });
+				} else {
+					const legend = [
+						{ key: "system", label: "系统提示词", tone: "dshu-sreadMeterSystem", tokens: breakdown.systemTokens },
+						{ key: "tools", label: "工具定义", tone: "dshu-sreadMeterTools", tokens: breakdown.toolsTokens },
+						{ key: "messages", label: "对话消息", tone: "dshu-sreadMeterMessages", tokens: breakdown.messageTokens }
+					];
+					for (const entry of legend) {
+						parts.push({ key: entry.key, tone: entry.tone, width: percent * entry.tokens / breakdownTotal });
+						rows.push({ label: entry.label, tone: entry.tone, value: "~" + formatCompactTokens(entry.tokens) });
+					}
+				}
+			}
+			return {
+				percent,
+				usedText,
+				capacityText,
+				// 宽度为 0 的段丢掉（核心同款）：`.segment` 的 2px 下限会在空上下文里画出假色块。
+				segments: parts.filter((part) => part.width > 0),
+				figures: "~" + usedText + " / " + capacityText,
+				text: "上下文 " + percent + "%（" + usedText + "/" + capacityText + "）",
+				rows
+			};
+		}
+
+		/** 顶掉核心 ActivityPill：`1 轮 80 步 · 速度 142 t/s`，点开是核心那张「会话统计」。 */
+		function ActivityReading(props) {
+			const useProjection = typeof props?.useProjection === "function" ? props.useProjection : null;
+			const stats = useProjection === null ? null : useProjection("sessionStats");
+			if (stats === null || stats === undefined || stats.steps === 0) return null;
+			const reading = activityReadings(stats);
+			// 一行计时都没有的窗口没有面板可看，就退回纯读数（核心 `PlainPill` 同款判断）。
+			const hasPanel = reading.rows.length > 0;
+			return h(StatReading, {
+				stat: "activity",
+				icon: iconGauge(),
+				label: joinedReading(reading.counts, reading.speed),
+				ariaLabel: reading.speed === null ? reading.counts : reading.counts + " · " + reading.speed,
+				title: hasPanel ? "会话统计" : null,
+				children: hasPanel ? dialogRows(reading.rows) : null
+			});
+		}
+
+		/** 顶掉核心 UsagePill：`消耗 570 万 · 缓存命中 88%`，点开是核心那张「Token 用量」。 */
+		function UsageReading(props) {
+			const useProjection = typeof props?.useProjection === "function" ? props.useProjection : null;
+			const usage = useProjection === null ? null : useProjection("tokenUsage");
+			if (usage === null || usage === undefined) return null;
+			if (billedInputTokens(usage) === 0 && usage.outputTokens === 0) return null;
+			const reading = usageReadings(usage);
+			return h(StatReading, {
+				stat: "usage",
+				icon: iconDatabase(),
+				label: joinedReading(reading.totalText, reading.hitText),
+				ariaLabel: reading.hitText === null ? reading.totalText : reading.totalText + " · " + reading.hitText,
+				title: "Token 用量",
+				titleValue: reading.totalExact,
+				children: dialogRows(reading.rows)
+			});
+		}
+
+		/** 自己加的一格上下文读数：`上下文 55%（144K/262K）`，点开是核心那块上下文面板。 */
+		function ContextReading(props) {
+			const useProjection = typeof props?.useProjection === "function" ? props.useProjection : null;
+			const pressure = useProjection === null ? null : useProjection("contextPressure");
+			const breakdown = useProjection === null ? null : useProjection("contextBreakdown");
+			const reading = contextReadings(pressure, breakdown);
+			if (reading === null) return null;
+			return h(StatReading, {
+				stat: "context",
+				icon: iconRing(),
+				label: reading.text,
+				ariaLabel: reading.text,
+				title: "上下文已用",
+				titleValue: reading.percent + "%",
+				figures: reading.figures,
+				meter: true,
+				segments: reading.segments,
+				children: meterRows(reading.rows)
+			});
+		}
+
+		/**
+		 * 挂进 composer dock：前两格用**同 id + 更低 priority** 顶掉核心那两格，第三格
+		 * 是自己的 id（`context`，顺带让上面那条藏仪表的 CSS 能靠 `data-composer-stat` 区分）。
+		 *
+		 * `priority` 是**同一个 cell 里的遮挡序**（升序，小的渲染，见 ui-slots
+		 * `entriesOfSlot`）：核心那两格是默认的 0，所以这里 -1 就赢。如果哪天刷新后看到
+		 * 「核心那格 + 我们这格」两格并存，说明遮挡没生效，把这个数再往下调一档就行。
+		 */
+		const READING_PRIORITY = -1;
+
+		function registerComposerReadings(ctx) {
+			const replace = (id, order, component) =>
+				ctx.slots.inject("conversation.composer.dock", () =>
+					ctx.slots.register({ name: "conversation.composer.dock", id, order, priority: READING_PRIORITY }, component)
+				);
+			replace("activity", 0, ActivityReading);
+			replace("usage", 1, UsageReading);
+			ctx.slots.inject("conversation.composer.dock", () =>
+				ctx.slots.register({ name: "conversation.composer.dock", id: "context", order: 2 }, ContextReading)
+			);
+		}
+		//#endregion
+
 		/** 本插件需要的客户端服务：只有 slot 注册表。 */
 		const inject = ["slots"];
 
@@ -1141,10 +1703,34 @@ window.__ModuleLoader__.load({
 					UsageIcon
 				)
 			);
+			// composer 下方那排读数：顶掉核心 activity / usage 两格 pill，再加一格自己的
+			// 上下文读数。纯 React + 官方 projection 席位，不碰核心 DOM、不挂 observer。
+			// 老版本没有这个槽位时别把上面两个入口带崩，所以单独兜一层。
+			try {
+				registerComposerReadings(ctx);
+			} catch (error) {
+				console.warn("[dsh-usage] composer 读数没挂上：", error);
+			}
 		}
 		//#endregion
 		exports.apply = apply;
 		exports.inject = inject;
+		/** 浏览器半边没有别的入口能 import，纯函数留一个自测口子（test-composer-readings.mjs）。 */
+		exports.__readings = {
+			trimTrailingZero,
+			formatWanReading,
+			formatCompactTokens,
+			formatExactTokens,
+			exactCount,
+			formatTokensPerSecond,
+			formatDuration,
+			billedInputTokens,
+			cacheHitPercent,
+			contextOccupancy,
+			activityReadings,
+			usageReadings,
+			contextReadings
+		};
 		return module.exports;
 	}
 });

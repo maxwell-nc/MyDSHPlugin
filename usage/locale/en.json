@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Token Usage",
-    "description": "Collects the usage reported by the model, totals tokens per day and per model, and adds a viewer entry at the bottom left of the web UI (above the settings button): a stacked bar chart shows each model's usage and share per day, and hovering a segment reveals the model, its color, the share and the amount. The ledger lives under the app data root (%LOCALAPPDATA%\\DeepSeekHarness\\data\\usage.json), not in the plugin directory."
+    "description": "Collects the usage reported by the model, totals tokens per day and per model, and adds a viewer entry at the bottom left of the web UI (above the settings button): a stacked bar chart shows each model's usage and share per day, and hovering a segment reveals the model, its color, the share and the amount. The ledger lives under the app data root (%LOCALAPPDATA%\\DeepSeekHarness\\data\\usage.json), not in the plugin directory. It also re-draws the readings below the composer as '1 轮 80 步 · 速度 142 t/s' / '消耗 570 万 · 缓存命中 88%' / '上下文 55%（144K/262K）' (it shadows the two core pills by id and paints its own click-open panels)."
   }
 }
