@@ -72,10 +72,11 @@ window.__ModuleLoader__.load({
 		const ensuredKeys = new Set();
 		/** 本地收藏（星标）模型，持久化键。 */
 		const FAV_KEY = "dsh-thinking-strength:favs";
-		/** 目录不可用时的兜底快照存储（避免 inject 异常把席位整个带崩）。 */
+		/** 目录不可用时的兜底快照存储（避免 inject 异常把席位整个带崩）。快照必须稳定缓存。 */
+		const noopSnapshot = { current: null, routable: null, groups: [], failures: [], status: "error", pending: null, error: null };
 		const noopStore = {
 			subscribe: () => () => {},
-			getSnapshot: () => ({ current: null, routable: null, groups: [], failures: [], status: "error", pending: null, error: null })
+			getSnapshot: () => noopSnapshot
 		};
 		const noopLoad = () => {};
 		const noopSelect = () => Promise.resolve(undefined);
@@ -267,7 +268,7 @@ window.__ModuleLoader__.load({
 					.catch(() => { setError("声明档位失败"); setBusy(false); });
 			};
 
-			const label = current ? shortName(current.model) : "选择模型";
+			const label = current ? cap(shortName(current.model)) : "选择模型";
 			const title = current
 				? current.model + (modelMeta !== null ? " · " + (modelMeta.reasoning ? "支持思考" : "无思考能力") : "")
 				: "单击选择模型";
@@ -411,7 +412,7 @@ window.__ModuleLoader__.load({
 			]);
 		}
 
-		const inject = ["slots", "modelDirectories", "sessions"];
+		const inject = ["slots", "modelDirectories", "sessions", "remote", "remote.session"];
 
 		/**
 		 * 输入框右侧的「思考」勾选框：勾选状态 = 当前模型在 llm-pi-ai 配置里是否
@@ -495,37 +496,74 @@ window.__ModuleLoader__.load({
 		}
 
 		function apply(ctx) {
-			const models = ctx.modelDirectories;
-			const sessions = ctx.sessions;
-			ctx.slots.inject("conversation.input.model", () =>
-				ctx.slots.register(
-					{
-						name: "conversation.input.model",
-						priority: -1,
-						inject: (sessionId) => {
-							let directory;
-							let available = false;
-							try {
-								directory = models.directoryFor(sessionId);
-								available = sessions.subagentAddress(sessionId) === undefined;
-							} catch { directory = undefined; available = false; }
-							return {
-								available: available,
-								directory: (directory && directory.store) || undefined,
-								load: () => { if (available && directory) directory.load().catch(() => { /* 错误落在 store 上 */ }); },
-								select: (selection) => (available && directory) ? directory.select(selection) : Promise.resolve(undefined)
-							};
-						}
-					},
-					ThinkingModelSeat
-				)
-			);
-			ctx.slots.inject("conversation.input.right", () =>
-				ctx.slots.register(
-					{ name: "conversation.input.right", id: "thinking-strength", order: 20 },
-					ThinkingStrengthCheckbox
-				)
-			);
+			// 与内置 ui-model-selection 保持一致：显式注入 remote / remote.session，
+			// 否则从本插件上下文调 directoryFor 时嵌套服务 remote.session 走不到注入链，
+			// 会抛 "cannot get property remote.session without inject"。
+			ctx.inject(["slots", "modelDirectories", "sessions", "remote", "remote.session"], (scope) => {
+				const models = scope.modelDirectories;
+				const sessions = scope.sessions;
+				const report = (tag, sessionId, detail) => {
+					try {
+						console.log("[dsh-thinking-strength] " + tag + " session=" + String(sessionId)
+							+ " " + JSON.stringify(detail));
+					} catch { /* 忽略日志错误 */ }
+				};
+				scope.slots.inject("conversation.input.model", () =>
+					scope.slots.register(
+						{
+							name: "conversation.input.model",
+							priority: -1,
+							inject: (sessionId) => {
+								let directory;
+								let available = false;
+								const detail = {
+									modelsOk: !!models,
+									sessionsOk: !!sessions,
+									directoryFor: null,
+									directoryForError: null,
+									subagentAddress: null,
+									subagentError: null
+								};
+								try {
+									if (models && models.directoryFor) {
+										directory = models.directoryFor(sessionId);
+										detail.directoryFor = directory ? "ok" : "undefined";
+									} else {
+										detail.directoryFor = "no-service";
+									}
+								} catch (err) {
+									detail.directoryForError = String((err && err.message) || err);
+									directory = undefined;
+								}
+								try {
+									const addr = sessions && sessions.subagentAddress
+										? sessions.subagentAddress(sessionId)
+										: "__undefined_service__";
+									available = addr === undefined;
+									detail.subagentAddress = addr === undefined ? "undefined" : JSON.stringify(addr);
+								} catch (err) {
+									detail.subagentError = String((err && err.message) || err);
+									available = false;
+								}
+								report("inject", sessionId, detail);
+								return {
+									available: available,
+									directory: (directory && directory.store) || undefined,
+									load: () => { if (directory) directory.load().catch(() => { /* 错误落在 store 上 */ }); },
+									select: (selection) => (available && directory) ? directory.select(selection) : Promise.resolve(undefined)
+								};
+							}
+						},
+						ThinkingModelSeat
+					)
+				);
+				scope.slots.inject("conversation.input.right", () =>
+					scope.slots.register(
+						{ name: "conversation.input.right", id: "thinking-strength", order: 20 },
+						ThinkingStrengthCheckbox
+					)
+				);
+			});
 		}
 		//#endregion
 
