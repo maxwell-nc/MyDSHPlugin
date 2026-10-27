@@ -1,0 +1,14 @@
+# dsh profile 补丁片段 —— 共享「模型显示名规范化」库。
+#
+# 这是一个组合包层（见 package.json 的 dsh.bundle.patch）。它没什么宿主侧功能，
+# 宿主半边（model-name.mjs）只是个占位：真正的内容是浏览器那半边 lib/client.js，
+# 它按包名 dsh-model-name 注册进浏览器模块表，让 usage / thinking 等客户端插件
+# 通过 require('dsh-model-name') 复用。
+#
+# 为什么要有这一条宿主行：客户端模块是按「Loader 挂载的每一行」去发现的（见
+# client-modules 的 resolveMeta），所以必须把它挂进插件树，浏览器半边才会进 boot 图。
+#
+# `name` 写裸包标识符（dsh-model-name），Loader 按包名解析，并进入 DSH 的 peer 兼容检查。
+- insert:
+    - id: dsh-model-name
+      name: dsh-model-name

@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		var react_dom = require("react-dom");
 		var react = require("react");
+		var modelName = require("dsh-model-name");
 		//#region dsh-usage/client.css
 		/**
 		 * 样式走自己的 class 前缀（dshu-），颜色一律引用 dsh 主题的 `--dsw-*` 变量并带
@@ -126,7 +127,7 @@ window.__ModuleLoader__.load({
 		const MAX_DAYS = 60;
 		/** 日期范围选择：最少选多少天（含首尾两天）。 */
 		const MIN_RANGE_DAYS = 2;
-		/** 本地存储键：是否隐藏模型名的 `/`、`\` 前缀（只影响展示，不落账）。 */
+		/** 本地存储键：是否「规范模型名」——剥前缀 + 统一显示大小写并合并同名用量（只影响展示，不落账）。 */
 		const PREFIX_STORAGE_KEY = "dsh-usage:hidePrefix";
 		const WAN = 1e4;
 		const YI = 1e8;
@@ -196,28 +197,11 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * 隐藏模型名的 `/`、`\` 前缀：取最后一个分隔符之后的一段（去首尾空白）。
-		 * `opencode/glm-5.3` → `glm-5.3`；`provider / 默认模型` → `默认模型`。
-		 * 没有分隔符就原样返回。
-		 */
-		function stripModelPrefix(name) {
-			const s = String(name ?? "");
-			const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
-			if (i < 0) return s;
-			const tail = s.slice(i + 1).trim();
-			return tail.length > 0 ? tail : s;
-		}
-
-		/** 首字母小写 → 大写（仅显示）；已大写/非字母开头保持不变。 */
-		function cap(s) {
-			return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s;
-		}
-
-		/**
 		 * 在选定的日期序列里重新聚合「天 × 模型」视图。
 		 *
-		 * `hidePrefix` 为真时：先剥掉模型名的前缀（`/\` 之后那一段），再按
-		 * **忽略大小写** 合并同名用量（`opencode/glm-5.3` 与 `GLM-5.3` 并到一行）。
+		 * `hidePrefix` 为真时（开关文案「规范模型名」）：先剥掉模型名的供应商前缀
+		 * （`/\` 之后那一段）并统一显示大小写（共享 dsh-model-name 的 displayName），
+		 * 再按**规范显示名**合并同名用量（`opencode/glm-5.3` 与 `GLM-5.3` 并到一行）。
 		 * 为假时按原始模型名原样分组，不做任何合并。日期跨度、合并逻辑都集中在这，
 		 * 所以开关与日期范围选择共用同一套数据加工。
 		 *
@@ -234,8 +218,8 @@ window.__ModuleLoader__.load({
 				for (const raw of Object.keys(day.models || {})) {
 					const bucket = day.models[raw];
 					if (!bucket || !(bucket.tokens > 0)) continue;
-					const label = hidePrefix ? cap(stripModelPrefix(raw)) : raw;
-					const key = (hidePrefix ? label.toLowerCase() : label) || label;
+					const label = hidePrefix ? modelName.displayName(raw) : raw;
+					const key = label;
 					const target = (row.models[key] =
 						row.models[key] || { tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 });
 					target.tokens += bucket.tokens || 0;
@@ -697,7 +681,7 @@ window.__ModuleLoader__.load({
 				row.tokens += tokens;
 				row.count += 1;
 				if (time > row.time) row.time = time; // 同一会话取最近一次时间
-				modelSetOf(row).add(hidePrefix ? cap(stripModelPrefix(entry.model)) : typeof entry.model === "string" ? entry.model : "");
+				modelSetOf(row).add(hidePrefix ? modelName.displayName(entry.model) : typeof entry.model === "string" ? entry.model : "");
 				if (typeof entry.title === "string" && entry.title.length > 0) row.title = entry.title;
 			});
 			const list = [...merged.values()]
@@ -823,7 +807,7 @@ window.__ModuleLoader__.load({
 			const maxDate = today;
 			const minDate = addDaysKey(maxDate, -(windowDays - 1));
 
-			// 开关：是否隐藏模型名的 `/`、`\` 前缀并合并同名（忽略大小写）用量。
+			// 开关：是否「规范模型名」——剥前缀 + 统一显示大小写并合并同名用量。
 			const [hidePrefix, setHidePrefix] = react.useState(() => {
 				try {
 					return window.localStorage.getItem(PREFIX_STORAGE_KEY) === "1";
@@ -956,7 +940,7 @@ window.__ModuleLoader__.load({
 						onChange: (event) => togglePrefix(event.target.checked)
 					}),
 					h("span", { className: "dshu-track" }),
-					h("span", { className: "dshu-switchLabel" }, "隐藏模型前缀（例如 opencode/glm-5.3 → glm-5.3，并合并同名）")
+					h("span", { className: "dshu-switchLabel" }, "规范模型名（例如 opencode/glm-5.3 → GLM-5.3，并合并同名）")
 				),
 				h(
 					"div",

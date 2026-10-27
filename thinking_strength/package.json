@@ -25,7 +25,9 @@
       "patch": "./cordis.patch.yml"
     },
     "client": {
-      "platform": "web"
+      "platform": "web",
+      "inject": ["dsh-model-name"],
+      "external": ["dsh-model-name"]
     }
   },
   "engines": {

@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		var react = require("react");
 		var reactDom = require("react-dom");
+		var modelName = require("dsh-model-name");
 
 		//#region dsh-thinking-strength/client.css
 		const css =
@@ -81,35 +82,14 @@ window.__ModuleLoader__.load({
 		const noopLoad = () => {};
 		const noopSelect = () => Promise.resolve(undefined);
 
-		/** 只保留斜杠后的短名：opencode/glm-5.3 → glm-5.3。 */
-		function shortName(id) {
-			if (!id) return "";
-			const parts = String(id).split(/[/\\]/u);
-			return parts[parts.length - 1];
-		}
-
 		/** 列表按原始名称 a–z 排序（组名、模型名都用）。 */
 		function byName(a, b) {
 			return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
 		}
 
-		/** 用最后一个 `/` 或 `\` 切出「二级供应商前缀」和基础名。无分隔符时 prefix 为 null。 */
-		function splitPrefix(text) {
-			if (!text) return { prefix: null, base: "" };
-			const s = String(text);
-			const idx = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
-			if (idx < 0) return { prefix: null, base: s };
-			return { prefix: s.slice(0, idx), base: s.slice(idx + 1) };
-		}
-
-		/** 首字母小写 → 大写（仅显示）；已大写/非字母开头保持不变。 */
-		function cap(s) {
-			return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s;
-		}
-
-		/** 供应商标题里的每个 ` · ` 片段各自首字母大写。 */
+		/** 供应商标题里的每个 ` · ` 片段各自首字母大写（复用共享 dsh-model-name 的 cap）。 */
 		function capLabel(s) {
-			return String(s).split(" · ").map(cap).join(" · ");
+			return String(s).split(" · ").map(modelName.cap).join(" · ");
 		}
 
 		/**
@@ -268,7 +248,7 @@ window.__ModuleLoader__.load({
 					.catch(() => { setError("声明档位失败"); setBusy(false); });
 			};
 
-			const label = current ? cap(shortName(current.model)) : "选择模型";
+			const label = current ? modelName.displayName(current.model) : "选择模型";
 			const title = current
 				? current.model + (modelMeta !== null ? " · " + (modelMeta.reasoning ? "支持思考" : "无思考能力") : "")
 				: "单击选择模型";
@@ -319,7 +299,7 @@ window.__ModuleLoader__.load({
 				// 用模型 id 里最后一个 `/` 或 `\` 的前缀分桶，前缀并进一级标题：`merge · cf`。
 				const buckets = new Map();
 				for (const model of group.models) {
-					const { prefix } = splitPrefix(model.id);
+					const { prefix } = modelName.splitPrefix(model.id);
 					if (!buckets.has(prefix)) buckets.set(prefix, []);
 					buckets.get(prefix).push(model);
 				}
@@ -334,7 +314,7 @@ window.__ModuleLoader__.load({
 					rows.push(h("div", { key: "g:" + group.id + "/" + (prefix ?? ""), className: "dts-group-head" }, capLabel(heading)));
 					for (const model of models) {
 						const active = current !== null && current.provider === group.id && current.model === model.id;
-						const label = cap(prefix === null ? (model.name || model.id) : splitPrefix(model.id).base);
+						const label = modelName.normalize(prefix === null ? (model.name || model.id) : modelName.splitPrefix(model.id).base);
 						const fav = favs.has(group.id + "\u0000" + model.id);
 						rows.push(h("button", {
 							key: group.id + "/" + model.id,
