@@ -72,6 +72,13 @@ window.__ModuleLoader__.load({
 		const ensuredKeys = new Set();
 		/** 本地收藏（星标）模型，持久化键。 */
 		const FAV_KEY = "dsh-thinking-strength:favs";
+		/** 目录不可用时的兜底快照存储（避免 inject 异常把席位整个带崩）。 */
+		const noopStore = {
+			subscribe: () => () => {},
+			getSnapshot: () => ({ current: null, routable: null, groups: [], failures: [], status: "error", pending: null, error: null })
+		};
+		const noopLoad = () => {};
+		const noopSelect = () => Promise.resolve(undefined);
 
 		/** 只保留斜杠后的短名：opencode/glm-5.3 → glm-5.3。 */
 		function shortName(id) {
@@ -119,10 +126,10 @@ window.__ModuleLoader__.load({
 		 */
 		function ThinkingModelSeat(props) {
 			const { locked, available, directory, load, select } = props;
-			const state = react.useSyncExternalStore(
-				(fn) => directory.subscribe(fn),
-				() => directory.getSnapshot()
-			);
+			const store = directory && typeof directory.subscribe === "function" ? directory : noopStore;
+			const safeLoad = typeof load === "function" ? load : noopLoad;
+			const safeSelect = typeof select === "function" ? select : noopSelect;
+			const state = react.useSyncExternalStore(store.subscribe, store.getSnapshot);
 			const [open, setOpen] = react.useState(false);
 			const [pos, setPos] = react.useState(null);
 			const [busy, setBusy] = react.useState(false);
@@ -161,7 +168,7 @@ window.__ModuleLoader__.load({
 			}, [groups, current]);
 
 			// 首次挂载确保目录加载，按钮标签随之出现。
-			react.useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+			react.useEffect(() => { try { safeLoad(); } catch { /* 忽略 */ } }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 			const tierIndex = react.useMemo(() => {
 				if (!current) return 0;
@@ -205,7 +212,7 @@ window.__ModuleLoader__.load({
 			const toggleOpen = () => {
 				if (locked || !available) return;
 				if (open) { setOpen(false); return; }
-				load();
+				try { safeLoad(); } catch { /* 忽略 */ }
 				place();
 				setOpen(true);
 			};
@@ -215,7 +222,7 @@ window.__ModuleLoader__.load({
 				// 点到当前已在用的模型：只收起来，不必重复提交一次选择。
 				if (current !== null && current.provider === providerId && current.model === model.id) return;
 				const defaultEffort = model?.reasoning?.defaultEffort;
-				select({
+				safeSelect({
 					provider: providerId,
 					model: model.id,
 					...(defaultEffort === undefined ? {} : { reasoningEffort: defaultEffort })
@@ -229,7 +236,7 @@ window.__ModuleLoader__.load({
 				setBusy(true);
 				setError(null);
 				const apply = () => {
-					select({
+					safeSelect({
 						provider: current.provider,
 						model: current.model,
 						...(tier.wire === undefined ? {} : { reasoningEffort: tier.wire })
@@ -496,13 +503,17 @@ window.__ModuleLoader__.load({
 						name: "conversation.input.model",
 						priority: -1,
 						inject: (sessionId) => {
-							const directory = models.directoryFor(sessionId);
-							const available = sessions.subagentAddress(sessionId) === undefined;
+							let directory;
+							let available = false;
+							try {
+								directory = models.directoryFor(sessionId);
+								available = sessions.subagentAddress(sessionId) === undefined;
+							} catch { directory = undefined; available = false; }
 							return {
 								available: available,
-								directory: directory.store,
-								load: () => { if (available) directory.load().catch(() => { /* 错误落在 store 上 */ }); },
-								select: (selection) => available ? directory.select(selection) : Promise.resolve(undefined)
+								directory: (directory && directory.store) || undefined,
+								load: () => { if (available && directory) directory.load().catch(() => { /* 错误落在 store 上 */ }); },
+								select: (selection) => (available && directory) ? directory.select(selection) : Promise.resolve(undefined)
 							};
 						}
 					},
