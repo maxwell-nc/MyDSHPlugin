@@ -310,13 +310,13 @@ function rememberEffort(key, effort) {
   }
 }
 
-/** 丢弃一个模型的档位（记忆里的档位不再被该模型接受时）。 */
+/** 丢弃一个模型的档位（用户点了「默认」档，或记忆里的档位不再被该模型接受）。 */
 function forgetEffort(key) {
   ensureEffortsLoaded()
   if (!efforts.delete(key)) return
   try {
     saveEfforts()
-    console.error(`${TAG} 已丢弃失效的思考强度记忆：${routeLabel(key)}`)
+    console.error(`${TAG} 已清除思考强度记忆：${routeLabel(key)}`)
   } catch (error) {
     console.error(`${TAG} 记忆表落盘失败：${reasonOf(error)}`)
   }
@@ -431,8 +431,14 @@ function applyEffortMemory(ctx) {
       lastRoute.set(session, key)
 
       if (previous === undefined || previous === key) {
-        // 同路由 = 用户在档位面板里的主动选择（含「恢复默认档」），记下来。
-        rememberEffort(key, selection.reasoningEffort)
+        // 同路由 = 用户在档位面板里的主动选择，记下来。
+        // 注意「默认」档（不显式发 reasoning_effort）：它没有档位 id 可记，必须
+        // **删掉**该模型的旧记忆，否则切走再切回时会把上次的非默认档回放回来，
+        // 悄悄盖掉用户这次选的「默认」。首见（previous === undefined）分不清是
+        // 「用户选模型」还是「选默认档」，那种情况不动记忆。
+        const effort = selection.reasoningEffort
+        if (typeof effort === 'string' && effort.length > 0) rememberEffort(key, effort)
+        else if (previous === key) forgetEffort(key)
         return
       }
       const wanted = efforts.get(key)

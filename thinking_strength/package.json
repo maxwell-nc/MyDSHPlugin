@@ -1,6 +1,6 @@
 {
   "name": "dsh-thinking-strength",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "type": "module",
   "description": "自绘模型选择座（斜杠后短名按钮 + 直达模型列表）与 5 档思考强度滑块（默认/低/中/高/最大）；按模型记住思考强度",

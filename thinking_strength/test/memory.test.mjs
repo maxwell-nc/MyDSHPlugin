@@ -328,6 +328,29 @@ console.log('用例 12：没有 configEditor（例如没挂 profile 配置层）
   ok('set 报 500 + 可读原因', res.status === 500 && /configEditor/.test(res.body.error ?? ''), res.body)
 }
 
+console.log('用例 13：同路由点「默认」档 → 清掉记忆，切回不再回放旧档位')
+{
+  const b = await boot({ defaultModel: { provider: 'merge', model: 'A' } })
+  b.append('s1', { provider: 'merge', model: 'A' })
+  b.append('s1', { provider: 'merge', model: 'A', reasoningEffort: 'high' })
+  ok('先记住 high', b.readMemory()?.providers?.merge?.A === 'high', b.readMemory())
+  b.append('s1', { provider: 'merge', model: 'A' })                          // 点「默认」：同路由、不带档位
+  ok('「默认」档清掉该模型记忆', b.readMemory()?.providers?.merge?.A === undefined, b.readMemory())
+  b.append('s1', { provider: 'merge', model: 'B', reasoningEffort: 'medium' })  // 切走
+  await tick()
+  b.append('s1', { provider: 'merge', model: 'A' })                          // 切回（宿主把档位重置成默认）
+  await tick()
+  ok('切回 A 不回放，尊重用户选的「默认」', b.selectCalls.length === 0, b.selectCalls)
+}
+
+console.log('用例 14：首见没带档位 → 不动记忆（分不清「选模型」还是「选默认档」）')
+{
+  const b = await boot({ memoryFile: { version: 1, providers: { merge: { A: 'max' } } } })
+  b.append('s1', { provider: 'merge', model: 'A' })
+  ok('记忆保留', b.readMemory()?.providers?.merge?.A === 'max', b.readMemory())
+  ok('也没有回放', b.selectCalls.length === 0, b.selectCalls)
+}
+
 console.log(failures === 0 ? '\n全部通过' : `\n${failures} 项失败`)
 rmSync(ROOT, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)
