@@ -12,10 +12,11 @@
  *
  *   1. 全局注册 `read_image_details` 工具：模型传「图片（路径 / URL /
  *      data:URL / attachment:sha256摘要前缀）+ 想了解的问题」；
- *   2. 每步发起模型请求前的 `system-prompt/assemble` waterfall 里读取当前
- *      会话正在用的模型，按**模型声明**（llm.resolveModelInfo →
- *      inputModalities）判断：当前模型自己能看图 → 把该工具从本步的工具
- *      schema 列表里摘掉；不能看图 → 保留。可见性随模型切换实时跟随；
+ *   2. 注册时挂一条**准入条件** `ctx.tools.register(def, { when })`：宿主每步
+ *      prepareStep 先跑 `tools.resolve({ agent, modelSelection, signal })`，
+ *      条件里按**模型声明**（llm.resolveModelInfo → inputModalities）判断：
+ *      当前模型自己能看图 → 这一步不给该工具；不能看图 → 给。可见性随模型
+ *      切换、以及 dsh-multimodal 现改 `input` 声明而实时跟随；
  *   3. 工具执行时：把图片经 attachments.saveImage() 落成持久化附件引用
  *      （ImageAttachmentRef，本地存档会做归一化/压缩），然后对设置面板指定
  *      的**多模态模型**发起一次 `llm.stream()` 视觉请求（内容块
@@ -43,10 +44,18 @@
  *   **模型看到的是 output.render 产出的内容块**（createSuccessResult 用
  *   render 产出 result.content 写进 tool/result 消息），所以视觉模型的答案
  *   必须完整出现在 render 文本里。
- * * 可见性过滤：AgentLoop.preStep 每步 systemPrompt.assemble()，`assembly.tools`
- *   就是本步模型可见的工具列表；在 agent.ctx 上 on('system-prompt/assemble')
- *   改返回值即可（installModelSelection 同款挂法）。摘掉/加回后宿主自己会
- *   依据 header diff 发 tool-addition/tool-removal 消息，不用插件管。
+ * * 可见性过滤：用 `ctx.tools.register(definition, { when })` 的准入条件。
+ *   宿主 AgentLoop.preStep 每步先 `tools.resolve({ agent, modelSelection,
+ *   signal })`（dsh-tools ToolsService.resolve）再组装系统提示，`when` 拿到
+ *   的正是本步的 { agent, modelSelection, signal }；返回 false 的注册同时从
+ *   tool 声明与派发里消失，宿主自己按 header diff 补 tool-addition /
+ *   tool-removal 消息，不用插件管。**when 抛错会让宿主以
+ *   TOOL_ACTIVATION_FAILED 终止本步**，所以条件内部必须把所有失败吞成 true。
+ *   ⚠️ 不要再用 `system-prompt/assemble` 改 `assembly.tools`：dsh 0.2.2 起
+ *   （提交 `feat(tools): admit conditional tools per step`）该 waterfall 只传
+ *   PromptPresentation（sections / contexts / variables），tools 由 tool
+ *   provider 持有、waterfall 之后才拼回，`assembly.tools` 恒为 undefined，
+ *   旧写法每步 TypeError → 落到「保底显示」，替身工具永远摘不掉。
  * * 当前模型路由（与 dsh-api-session-controller selectionFor / agent-loop
  *   prepareRequest 完全相同的优先级）：
  *   sessionProjections.stateOf(session,'modelSelection').pending（用户刚选）
@@ -89,8 +98,8 @@ const TOOL_NAME = 'read_image_details'
 /** 设置面板用的两条 connection 路由。 */
 const API_CATALOG = '/api/dsh-image-reader.catalog'
 const API_CONFIG = '/api/dsh-image-reader.config'
-/** 能力缓存的 TTL：声明式能力基本不变，但 llm-pi-ai 的 input 可以被用户改。 */
-const CAPABILITY_TTL_MS = 60_000
+/** 设置面板候选目录的 TTL（工具可见性判断不缓存，见 declaredInput）。 */
+const DISCOVERY_TTL_MS = 60_000
 /** 拉模型目录时每个 provider 的超时。 */
 const DISCOVERY_TIMEOUT_MS = 8_000
 /** 抓 URL 图片的超时。 */
@@ -215,26 +224,20 @@ export function apply(ctx, config) {
     }
   }
 
-  // ================================================================ 能力缓存
-  /** `${provider}\0${model}` → { input, at }；llm/adapters-updated 或 TTL 过期失效。 */
-  const capabilityCache = new Map()
-  ctx.on('llm/adapters-updated', () => {
-    capabilityCache.clear()
-    discoveryCache = { at: 0, rows: undefined }
-  })
-
-  /** 模型声明的 inputModalities（dsh-llm resolveModelInfo；pi-ai 是纯内存读）。 */
+  // ================================================================ 模型能力
+  /**
+   * 模型声明的 inputModalities（dsh-llm resolveModelInfo）。
+   *
+   * 这里**故意不缓存**：内置 adapter（pi-ai / deepseek）的 resolveModel 都是
+   * 纯内存查表，而 dsh-multimodal 的勾选框就是现改 llm-pi-ai settings 里的
+   * `input` —— 缓存一个 TTL 会让「勾上后替身工具该消失」慢半拍（还依赖
+   * llm/adapters-updated 这种只在路由集变化时才发的事件），最容易被当成
+   * 「勾了还在塞工具」的 bug。
+   */
   const declaredInput = async (provider, model, signal) => {
-    const key = `${provider}\u0000${model}`
-    const hit = capabilityCache.get(key)
-    const now = Date.now()
-    if (hit !== undefined && now - hit.at < CAPABILITY_TTL_MS) return hit.input
     const info = await ctx.llm.resolveModelInfo(provider, model, signal)
-    const input = info?.inputModalities !== undefined && info.inputModalities !== null
-      ? Array.isArray(info.inputModalities) ? [...info.inputModalities] : undefined
-      : undefined
-    capabilityCache.set(key, { input, at: now })
-    return input
+    if (info?.inputModalities === undefined || info.inputModalities === null) return undefined
+    return Array.isArray(info.inputModalities) ? [...info.inputModalities] : undefined
   }
 
   /** 按声明是否支持图片输入（未声明按不支持处理）。 */
@@ -244,10 +247,16 @@ export function apply(ctx, config) {
   }
 
   // ================================================================ 模型目录
+  /** 目录只服务设置面板的候选列表（网络/网关枚举），所以仍然短 TTL 缓存。 */
   let discoveryCache = { at: 0, rows: undefined }
+  /** 任何一处能力声明可能变了就重算：适配器拓扑更新、或 settings 文档变更
+   *（dsh-multimodal 勾选框改的正是 llm-pi-ai 的 models[].input）。 */
+  const invalidateDiscovery = () => { discoveryCache = { at: 0, rows: undefined } }
+  ctx.on('llm/adapters-updated', invalidateDiscovery)
+  ctx.on('settings/document-updated', invalidateDiscovery)
   /** 全量模型目录（带是否声明图片输入），设置面板与「自动选择」共用。 */
   const discoverModels = async (signal) => {
-    if (discoveryCache.rows !== undefined && Date.now() - discoveryCache.at < CAPABILITY_TTL_MS) {
+    if (discoveryCache.rows !== undefined && Date.now() - discoveryCache.at < DISCOVERY_TTL_MS) {
       return discoveryCache.rows
     }
     const rows = []
@@ -328,43 +337,35 @@ export function apply(ctx, config) {
   }
 
   // ================================================================ 工具可见性
-  /** 每台 agent 安装一次：agent.ctx 上的 system-prompt/assemble waterfall。 */
-  const installed = new WeakSet()
-  const installForAgent = (agent) => {
-    if (installed.has(agent)) return
-    installed.add(agent)
-    agent.ctx.on('system-prompt/assemble', async (assembly, context, next) => {
-      const assembled = await next()
-      try {
-        const settings = liveConfig()
-        const keep = assembled.tools.filter((tool) => tool.name !== TOOL_NAME)
-        if (settings.visibility === 'never') {
-          return keep.length === assembled.tools.length ? assembled : { ...assembled, tools: keep }
-        }
-        if (settings.visibility === 'always') return assembled
-        const subject = context?.agent ?? agent
-        if (subject === undefined) return assembled
-        const route = sessionRoute(subject)
-        if (route === undefined) return assembled
-        const canSee = await supportsImage(route.provider, route.model, context?.signal)
-        // 声明支持图片输入 → 当前模型自己能看图 → 摘掉替身工具
-        if (canSee) return keep.length === assembled.tools.length ? assembled : { ...assembled, tools: keep }
-      } catch (error) {
-        // 保底显示：判断失败顶多多用一次工具，把 agent 一步搞挂不可接受
-        console.error(`${TAG} 可见性判断失败（保底显示）: ${String(error?.message ?? error)}`)
-      }
-      return assembled
-    })
+  /**
+   * 本步该不该把替身工具给模型（`ctx.tools.register(def, { when })` 的准入条件）。
+   *
+   * 宿主每步 prepareStep 先 `tools.resolve({ agent, modelSelection, signal })`
+   * 再组装系统提示，`modelSelection` 就是本步真实要用的路由
+   *（agent-loop 的 `this.model.current()`：pending 选择 → 上次请求头 →
+   * agent.options），所以这里不再自己算一遍；万一缺失才退回 sessionRoute。
+   *
+   * **必须把一切失败吞成 true**：`when` 抛错会让宿主以
+   * TOOL_ACTIVATION_FAILED 直接终止本步，而判断失败最多是多给模型一次工具。
+   */
+  const toolVisible = async ({ agent, modelSelection, signal }) => {
+    try {
+      const settings = liveConfig()
+      if (settings.visibility === 'never') return false
+      if (settings.visibility === 'always') return true
+      const route = typeof modelSelection?.provider === 'string' && modelSelection.provider.length > 0
+        && typeof modelSelection?.model === 'string' && modelSelection.model.length > 0
+        ? { provider: modelSelection.provider, model: modelSelection.model }
+        : sessionRoute(agent)
+      if (route === undefined) return true
+      const canSee = await supportsImage(route.provider, route.model, signal)
+      // 声明支持图片输入 → 当前模型自己能看图 → 这一步不给替身工具
+      return canSee !== true
+    } catch (error) {
+      console.error(`${TAG} 可见性判断失败（保底显示）: ${String(error?.message ?? error)}`)
+      return true
+    }
   }
-
-  ctx.on('agent/created', async ({ agent }) => {
-    installForAgent(agent)
-  })
-  // 热装场景：宿主里已经在跑的 agent 也要补装
-  try {
-    const agents = ctx.get('agents')
-    if (typeof agents?.list === 'function') for (const agent of agents.list()) installForAgent(agent)
-  } catch { /* ignore */ }
 
   // ================================================================ 图片获取
   /** attachment:sha256: 前缀 → 会话历史里被省略的图的完整附件引用。 */
@@ -747,7 +748,10 @@ export function apply(ctx, config) {
         elapsedMs: Date.now() - started
       }
     }
-  }))
+  }), {
+    // 每步一步式准入判断：当前模型自己能看图时不暴露替身工具（见 toolVisible）。
+    when: toolVisible
+  })
 
   // ================================================================ 设置面板 API
   // settings + connection 是 web 桌面组合的服务，缺了就不挂 API（CLI 组合里
@@ -825,8 +829,7 @@ export function apply(ctx, config) {
             }
             throw error
           }
-          discoveryCache = { at: 0, rows: undefined }
-          capabilityCache.clear()
+          invalidateDiscovery()
           const fresh = await catalogRow()
           return fresh
         } catch (error) {
