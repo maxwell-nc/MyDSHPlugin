@@ -1,9 +1,12 @@
 {
   "name": "dsh-model-name",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "共享的模型显示名规范化（display-name dictionary）：把 deepseek→DeepSeek、glm→GLM、qwen→Qwen、mimo→MiMo、minimax→MiniMax、v+数字→V+数字、-flash→-Flash 等统一成规范显示名，供 usage / thinking 等客户端插件 require 复用。纯显示层，不改变存储/匹配用的模型 id。",
+  "description": "共享的模型显示名规范化（display-name dictionary）：把 deepseek→DeepSeek、glm→GLM、qwen→Qwen、mimo→MiMo、minimax→MiniMax、v+数字→V+数字、-flash→-Flash 等统一成规范显示名，供 usage / thinking 等客户端插件 require 复用。并提供徽章切分（displayParts/splitBadge）：把末尾的 -TokenPlan / -Free / -DL / 4 位构建号切出来单独画成徽章（如 DeepSeek-V4-Flash-0731-TokenPlan → DeepSeek-V4-Flash + 0731-TokenPlan）。纯显示层，不改变存储/匹配用的模型 id。",
+  "scripts": {
+    "test": "node test/model-name.test.mjs"
+  },
   "exports": {
     ".": "./model-name.mjs",
     "./client": "./lib/client.js",

@@ -45,12 +45,51 @@ window.__ModuleLoader__.load({
 			}
 		})();
 
+		/**
+		 * 徽章切分：把显示名末尾的「套餐 / 渠道 / 构建」标记从名字里切出来，单独画成徽章。
+		 *
+		 *   DeepSeek-V4-Flash-0731-TokenPlan → DeepSeek-V4-Flash + 徽章 0731-TokenPlan
+		 *   Qwen3.8-27B-TokenPlan            → Qwen3.8-27B       + 徽章 TokenPlan
+		 *   GLM-5.3-Flash-Free               → GLM-5.3-Flash     + 徽章 Free
+		 *   GLM-5.3                          → GLM-5.3           （无徽章）
+		 *
+		 * 规则以共享 dsh-model-name 的 splitBadge 为准（与 usage 同一套，改一处两处都变）；
+		 * 它没装或版本较旧时退回下面这份等价实现，只影响徽章画在哪，不影响功能。
+		 * **纯显示层**：只改画出来的样子，模型 id 一个字都不动。
+		 */
+		const BADGE_WORDS = new Set(["tokenplan", "free", "trial", "beta", "preview", "demo", "dl"]);
+		const BUILD_SEGMENT = /^\d{4}$/;
+		/** 本地兜底的徽章切分（至少留一段基础名；整名都是标记时不切）。 */
+		function localSplitBadge(text) {
+			const s = String(text ?? "").trim();
+			if (s.length === 0) return { base: "", badge: "" };
+			const segments = s.split("-");
+			let cut = segments.length;
+			while (cut > 1) {
+				const seg = segments[cut - 1];
+				if (!BUILD_SEGMENT.test(seg) && !BADGE_WORDS.has(seg.toLowerCase())) break;
+				cut -= 1;
+			}
+			if (cut === segments.length) return { base: s, badge: "" };
+			return { base: segments.slice(0, cut).join("-"), badge: segments.slice(cut).join("-") };
+		}
+		/** 显示名的 `{ base, badge }`；共享库给出的形状不对（旧版本 / 测试桩）时用本地兜底。 */
+		function nameParts(label) {
+			const shared = typeof modelName.splitBadge === "function" ? modelName.splitBadge(label) : null;
+			if (shared !== null && shared !== undefined && typeof shared.base === "string" && shared.base.length > 0) {
+				return { base: shared.base, badge: typeof shared.badge === "string" ? shared.badge : "" };
+			}
+			return localSplitBadge(label);
+		}
+
 		//#region dsh-thinking-strength/client.css
 		const css =
 			".dts-seat{display:inline-flex;align-items:center;gap:8px;height:26px}" +
-			".dts-mbtn{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 10px;border:1px solid var(--dsw-alias-border-l1,#d6dbe3);border-radius:999px;background:var(--dsw-alias-bg-layer-2,#ffffff);color:var(--dsw-alias-label-secondary,#5b6478);font-size:12px;line-height:1;cursor:pointer;white-space:nowrap}" +
+			".dts-mbtn{display:inline-flex;align-items:center;gap:4px;height:26px;max-width:320px;padding:0 10px;border:1px solid var(--dsw-alias-border-l1,#d6dbe3);border-radius:999px;background:var(--dsw-alias-bg-layer-2,#ffffff);color:var(--dsw-alias-label-secondary,#5b6478);font-size:12px;line-height:1;cursor:pointer;white-space:nowrap}" +
 			".dts-mbtn:hover{border-color:var(--dsw-alias-border-l2,#c2c9d6)}" +
 			".dts-mbtn:disabled{opacity:.5;cursor:default}" +
+			".dts-mname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+			".dts-tag{box-sizing:border-box;flex:none;display:inline-flex;align-items:center;max-width:140px;overflow:hidden;text-overflow:ellipsis;padding:1px 7px;border:1px solid #cfe2fb;border-radius:6px;background:#e8f1fe;color:#2f6fd0;font-size:12px;line-height:16px;font-weight:500;letter-spacing:.2px;white-space:nowrap}" +
 			".dts-caret{font-size:10px;color:#aab2c0;width:12px;text-align:center;display:inline-block}" +
 			".dts-list{position:fixed;z-index:1200;width:300px;max-height:340px;overflow:auto;background:#ffffff;border:1px solid var(--dsw-alias-border-l1,#e8ecf2);border-radius:20px;box-shadow:0 6px 20px rgba(20,25,40,.10),0 1px 4px rgba(20,25,40,.05);padding:8px;color:var(--dsw-alias-label-primary,#20242c);scrollbar-width:none;-ms-overflow-style:none}" +
 			".dts-list::-webkit-scrollbar{display:none}" +
@@ -61,6 +100,7 @@ window.__ModuleLoader__.load({
 			".dts-model-row.dts-active{color:#4176E6;font-weight:600}" +
 			".dts-model-row:disabled{opacity:.5;cursor:default}" +
 			".dts-row{display:flex;align-items:center;gap:10px;min-width:0}" +
+			".dts-row-main{display:flex;align-items:center;gap:6px;flex:1;min-width:0}" +
 			".dts-row-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
 			".dts-star{flex:none;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:15px;line-height:1;color:#e6eaf1;cursor:pointer;opacity:0;border:none;background:none;padding:0;transition:none}" +
 			".dts-star:hover{opacity:1;color:#c6cdd9}" +
@@ -294,7 +334,9 @@ window.__ModuleLoader__.load({
 					.catch(() => { setError("声明档位失败"); setBusy(false); });
 			};
 
-			const label = current ? modelName.displayName(current.model) : "选择模型";
+			// 按钮上的名字：基础名 + 徽章（徽章规则与列表、usage 共用同一套，只改呈现）。
+			const currentName = current === null || current === undefined ? null : nameParts(modelName.displayName(current.model));
+			const label = currentName === null ? "选择模型" : currentName.base;
 			const title = current
 				? current.model + (modelMeta !== null ? " · " + (modelMeta.reasoning ? "支持思考" : "无思考能力") : "")
 				: "单击选择模型";
@@ -361,6 +403,9 @@ window.__ModuleLoader__.load({
 					for (const model of models) {
 						const active = current !== null && current.provider === group.id && current.model === model.id;
 						const label = modelName.normalize(prefix === null ? (model.name || model.id) : modelName.splitPrefix(model.id).base);
+						// 名字末尾的套餐 / 渠道 / 构建标记（TokenPlan、Free、0731…）单独画成徽章，
+						// 只影响呈现：点的还是同一个 model.id，收藏也仍按 id 记。
+						const parts = nameParts(label);
 						const fav = favs.has(group.id + "\u0000" + model.id);
 						rows.push(h("button", {
 							key: group.id + "/" + model.id,
@@ -369,7 +414,12 @@ window.__ModuleLoader__.load({
 							disabled: pending !== null && !active,
 							onClick: () => pick(group.id, model)
 						}, h("span", { className: "dts-row" }, [
-							h("span", { className: "dts-row-label" }, label),
+							h("span", { className: "dts-row-main" }, [
+								h("span", { className: "dts-row-label" }, parts.base),
+								parts.badge.length > 0
+									? h("span", { className: "dts-tag", title: parts.badge }, parts.badge)
+									: null
+							]),
 							h("span", {
 								role: "button",
 								tabIndex: -1,
@@ -393,7 +443,10 @@ window.__ModuleLoader__.load({
 					"data-open": open ? "true" : undefined,
 					onClick: toggleOpen
 				}, [
-					label,
+					h("span", { key: "name", className: "dts-mname" }, label),
+					currentName !== null && currentName.badge.length > 0
+						? h("span", { key: "tag", className: "dts-tag" }, currentName.badge)
+						: null,
 					h("span", { key: "caret", className: "dts-caret" }, open ? "▲" : "▼")
 				]),
 				(error || storeError)

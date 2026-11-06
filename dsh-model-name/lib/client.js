@@ -21,7 +21,12 @@ window.__ModuleLoader__.load({
 		 * 扩展（先这些规则，后续方便添加）：
 		 *   - 加词典项：  registerRule('dict', 'key', 'Display')        —— 大小写不敏感匹配
 		 *   - 加正则替换：registerRule('regex', /\b(v)(\d)/i, '$1$2' 的大写版, 见示例)
+		 *   - 加徽章词：  registerTag('tokenplan', 'TokenPlan')
 		 *   规则可以用 `-` 切段做逐段匹配，避免误伤长名的中间部分。
+		 *
+		 * 徽章（splitBadge / displayParts）：模型名末尾的套餐 / 渠道 / 构建标记
+		 * （-TokenPlan、-Free、-DL、-0731 这类）单独切出来，交给调用方画成徽章；
+		 * 只切显示名，id 原样不动。
 		 */
 
 		/** 规范化词典：小写键 → 规范显示形。命中即整段替换。 */
@@ -36,6 +41,30 @@ window.__ModuleLoader__.load({
 
 		/** 逐段正则替换规则：段未被词典命中时依次尝试，[RegExp, 替换串]。 */
 		const REGEX_RULES = [];
+
+		/**
+		 * 徽章词典：模型名末尾的「套餐 / 渠道 / 构建」标记段（小写键 → 规范显示形）。
+		 *
+		 * 这些段只说明「是同一个模型的哪个发行变体」，不说明「是哪个模型」，所以展示时
+		 * 从名字里切出来单独画成徽章（见 splitBadge）：
+		 *   cf/DeepSeek-V4-Flash-0731-TokenPlan → DeepSeek-V4-Flash + 徽章 0731-TokenPlan
+		 *   cf/Qwen3.8-27B-TokenPlan            → Qwen3.8-27B       + 徽章 TokenPlan
+		 *   opencodezen/glm-5.3-flash-free      → GLM-5.3-Flash     + 徽章 Free
+		 *   ctai_my/glm-5.3                     → GLM-5.3           （无徽章）
+		 * 词典也可运行时扩展（registerTag），新标记不用改这份代码。
+		 */
+		const TAGS = new Map([
+			["tokenplan", "TokenPlan"],
+			["free", "Free"],
+			["trial", "Trial"],
+			["beta", "Beta"],
+			["preview", "Preview"],
+			["demo", "Demo"],
+			["dl", "DL"]
+		]);
+
+		/** 构建号 / 日期标记：纯 4 位数字段（0731、1017、0817），紧挨徽章时并入徽章。 */
+		const BUILD_SEGMENT = /^\d{4}$/;
 
 		/** 结构/大小写规则（作用于单个 `-` 段，未命中词典时兜底）。 */
 		function normalizeCasing(seg) {
@@ -52,6 +81,7 @@ window.__ModuleLoader__.load({
 			const s = String(seg);
 			const lower = s.toLowerCase();
 			if (DICTIONARY.has(lower)) return DICTIONARY.get(lower);
+			if (TAGS.has(lower)) return TAGS.get(lower);
 			for (const [re, repl] of REGEX_RULES) {
 				const next = s.replace(re, repl);
 				if (next !== s) return next;
@@ -111,6 +141,52 @@ window.__ModuleLoader__.load({
 			return normalize(shortName(id));
 		}
 
+		/** 该段是不是徽章段：徽章词典命中，或 4 位构建号。 */
+		function isBadgeSegment(seg) {
+			const s = String(seg ?? "");
+			return BUILD_SEGMENT.test(s) || TAGS.has(s.toLowerCase());
+		}
+
+		/**
+		 * 把「基础名 + 末尾徽章」切开（**纯显示层**，绝不改 id）。
+		 *
+		 * 从末尾往前收集连续的徽章段（TokenPlan / Free / DL / 4 位构建号），至少留一段
+		 * 基础名：整名都是标记时（例如 openrouter/free 的短名 free）不切，原样当一个名字。
+		 *
+		 * @returns {{base: string, badge: string}} `badge` 为空串表示「无徽章」。
+		 */
+		function splitBadge(text) {
+			const s = String(text ?? "").trim();
+			if (s.length === 0) return { base: "", badge: "" };
+			const segments = s.split("-");
+			let cut = segments.length;
+			while (cut > 1 && isBadgeSegment(segments[cut - 1])) cut -= 1;
+			if (cut === segments.length) return { base: s, badge: "" };
+			return { base: segments.slice(0, cut).join("-"), badge: segments.slice(cut).join("-") };
+		}
+
+		/** 一键切分：短名 → 规范化 → 拆徽章。`{ base, badge }`，无徽章时 badge 为空串。 */
+		function displayParts(id) {
+			return splitBadge(displayName(id));
+		}
+
+		/**
+		 * 运行时加徽章标记词（例如以后多出的套餐名），无需改这份代码。
+		 * @param word - 标记词（大小写不敏感）
+		 * @param display - 规范显示形；省略时按词首字母大写
+		 */
+		function registerTag(word, display) {
+			const key = String(word ?? "").trim().toLowerCase();
+			if (key.length === 0) return normalize;
+			TAGS.set(key, display == null ? key.charAt(0).toUpperCase() + key.slice(1) : String(display));
+			return normalize;
+		}
+
+		/** 只读快照：当前徽章标记词（小写键 → 规范显示形）。 */
+		function getTags() {
+			return [...TAGS.entries()];
+		}
+
 		/** 只读快照：当前词典条目（小写键 → 规范显示形）。 */
 		function getDictionary() {
 			return [...DICTIONARY.entries()];
@@ -118,6 +194,11 @@ window.__ModuleLoader__.load({
 
 		exports.normalize = normalize;
 		exports.displayName = displayName;
+		exports.displayParts = displayParts;
+		exports.splitBadge = splitBadge;
+		exports.isBadgeSegment = isBadgeSegment;
+		exports.registerTag = registerTag;
+		exports.getTags = getTags;
 		exports.registerRule = registerRule;
 		exports.shortName = shortName;
 		exports.splitPrefix = splitPrefix;

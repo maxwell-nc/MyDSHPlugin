@@ -1,9 +1,9 @@
 {
   "name": "dsh-thinking-strength",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
-  "description": "自绘模型选择座（斜杠后短名按钮 + 直达模型列表）与 5 档思考强度滑块（默认/低/中/高/最大）；按模型记住思考强度",
+  "description": "自绘模型选择座（斜杠后短名按钮 + 直达模型列表，末尾的套餐/渠道/构建标记画成同色徽章，只改呈现不动 id）与 5 档思考强度滑块（默认/低/中/高/最大）；按模型记住思考强度",
   "exports": {
     ".": "./thinking-strength.mjs",
     "./client": "./lib/client.js",

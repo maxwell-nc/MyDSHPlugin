@@ -32,7 +32,8 @@ usage/
 ├── usage.mjs           # host 半边：采集 + 读取接口
 ├── lib/client.js       # 浏览器半边：入口 + 面板 + 柱状图 + composer 三格读数
 ├── test-record-external.mjs    # 外来上报的自测
-└── test-composer-readings.mjs  # composer 读数的自测
+├── test-composer-readings.mjs  # composer 读数的自测
+└── test-model-merge.mjs        # 「合并徽章」与「规范模型名」聚合的自测（装共享库真身）
 ```
 
 **账本不在上面这个目录里。** 它放在**应用数据根**下：
@@ -216,6 +217,19 @@ pnpm add D:\Project\dsplugin\usage
 `localStorage`（`dsh-usage:hidePrefix`），关掉即恢复成按原始模型名精确分组。图表、图例、
 气包、明细列表的模型列统一走这一口径；归并后的 id 用折叠键、label 用展示名，图和例
 对齐，不会丢模型。
+
+**「合并徽章」开关（默认开）：在规范模型名的基础上，再把末尾的套餐 / 渠道 / 构建标记
+去掉，同一个模型的发行变体并成一行。** 开关上只写短名「规范模型名」/「合并徽章」，
+长说明（含例子）放在悬停的 `title` 提示里，操作行不被文字撑长。规则来自共享库
+`dsh-model-name`（`splitBadge`，
+与 thinking_strength 的模型座同一套）：末尾连续的徽章段（`TokenPlan`、`Free`、`Trial`、
+`Beta`、`Preview`、`Demo`、`DL` 这些词典词，以及 `0731`/`1017`/`0817` 这样的 4 位构建号）
+从统计键里切掉 —— 例：`DeepSeek-V4-Flash-0731-TokenPlan` 与 `DeepSeek-V4-Flash-0817-DL`
+都算作 `DeepSeek-V4-Flash`，`GLM-5.3-Flash-Free` 算作 `GLM-5.3-Flash`；`GLM-5.3` 本来
+就没徽章，不受影响。开关存 `localStorage`（`dsh-usage:mergeBadge`，只有显式存过 `0` 才算关），
+开着时**先**（可选地）规范模型名、**再**切徽章，所以不剥前缀时切的是原始 id 的末尾标记
+（`cf/DeepSeek-V4-Flash-0731-TokenPlan` → `cf/DeepSeek-V4-Flash`）。同样**只影响展示与聚合键**：
+账本里记的仍是原始 model id，「最近消耗来源」明细列也照旧按真实模型名显示，方便对账。
 
 **横轴刻度只写「日」，不写月份。** 完整日期在 `title` 和 hover 气包里都有。
 

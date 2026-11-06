@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Thinking Strength",
-    "description": "A self-drawn model seat: the left model button shows only the short name after the last slash and opens a model list for direct selection; the right 5-level slider switches thinking strength (default/low/medium/high/max). The chosen level is remembered per model, so switching away and back restores your pick instead of resetting it."
+    "description": "A self-drawn model seat: the left model button shows only the short name after the last slash and opens a model list for direct selection; trailing plan/channel/build markers (-TokenPlan, -Free, -0731 ...) are drawn as same-colored badges, presentation only, model ids untouched. The right 5-level slider switches thinking strength (default/low/medium/high/max). The chosen level is remembered per model, so switching away and back restores your pick instead of resetting it."
   }
 }

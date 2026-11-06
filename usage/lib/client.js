@@ -179,6 +179,15 @@ window.__ModuleLoader__.load({
 		const MIN_RANGE_DAYS = 2;
 		/** 本地存储键：是否「规范模型名」——剥前缀 + 统一显示大小写并合并同名用量（只影响展示，不落账）。 */
 		const PREFIX_STORAGE_KEY = "dsh-usage:hidePrefix";
+		/**
+		 * 本地存储键：是否「合并徽章」——**默认开**。
+		 *
+		 * 把模型名末尾的套餐 / 渠道 / 构建标记（-TokenPlan、-Free、-DL、-0731 这类）从
+		 * 统计键里去掉，同一个模型的发行变体并成一行：
+		 *   cf/DeepSeek-V4-Flash-0731-TokenPlan + cf/DeepSeek-V4-Flash-0817-DL → DeepSeek-V4-Flash
+		 * 只影响统计与图例的展示，账本里记的还是原始 model id。
+		 */
+		const BADGE_STORAGE_KEY = "dsh-usage:mergeBadge";
 		const WAN = 1e4;
 		const YI = 1e8;
 		const YI_CUTOFF = 9999.5 * WAN;
@@ -247,19 +256,46 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
+		 * 去掉模型名末尾的「徽章」（套餐 / 渠道 / 构建标记），只留基础名。
+		 *
+		 * 规则在共享 dsh-model-name 的 splitBadge 里（-TokenPlan、-Free、-DL、4 位构建号），
+		 * 这里只负责调用；返回形状不对（旧版本共享库 / 测试桩）时原样返回，不让展示层崩。
+		 */
+		function badgeBase(label) {
+			if (typeof modelName.splitBadge !== "function") return label;
+			try {
+				const parts = modelName.splitBadge(label);
+				if (parts && typeof parts.base === "string" && parts.base.length > 0) return parts.base;
+			} catch { /* 忽略：拿不到就按原名显示 */ }
+			return label;
+		}
+
+		/** 一个模型 id 落到统计键上：剥前缀 / 规范化（可选）+ 合并徽章（可选）。 */
+		function displayKey(raw, hidePrefix, mergeBadge) {
+			const shown = hidePrefix ? modelName.displayName(raw) : raw;
+			return mergeBadge ? badgeBase(shown) : shown;
+		}
+
+		/**
 		 * 在选定的日期序列里重新聚合「天 × 模型」视图。
 		 *
 		 * `hidePrefix` 为真时（开关文案「规范模型名」）：先剥掉模型名的供应商前缀
 		 * （`/\` 之后那一段）并统一显示大小写（共享 dsh-model-name 的 displayName），
 		 * 再按**规范显示名**合并同名用量（`opencode/glm-5.3` 与 `GLM-5.3` 并到一行）。
-		 * 为假时按原始模型名原样分组，不做任何合并。日期跨度、合并逻辑都集中在这，
-		 * 所以开关与日期范围选择共用同一套数据加工。
+		 * 为假时按原始模型名原样分组，不做任何合并。
+		 *
+		 * `mergeBadge` 为真时（开关文案「合并徽章」，**默认开**）：再往前一步，把末尾的
+		 * 套餐 / 构建标记也去掉，同一个模型的发行变体并成一行
+		 * （`DeepSeek-V4-Flash-0731-TokenPlan` 与 `DeepSeek-V4-Flash-0817-DL` → `DeepSeek-V4-Flash`）。
+		 * 两个开关都只改展示与聚合键，账本里记的仍是原始 model id。
+		 *
+		 * 日期跨度、合并逻辑都集中在这，所以开关与日期范围选择共用同一套数据加工。
 		 *
 		 * @param keys - 要展示的日期键数组（含首尾）。
 		 * @param recorded - 日期键 → 当天原始天数行（含 `models`）。
 		 * @returns {days, models, total} days=models 用归一化后的模型名当键。
 		 */
-		function buildView(keys, recorded, hidePrefix) {
+		function buildView(keys, recorded, hidePrefix, mergeBadge) {
 			const totals = new Map();
 			const days = keys.map((date) => {
 				const day = recorded.get(date);
@@ -268,7 +304,7 @@ window.__ModuleLoader__.load({
 				for (const raw of Object.keys(day.models || {})) {
 					const bucket = day.models[raw];
 					if (!bucket || !(bucket.tokens > 0)) continue;
-					const label = hidePrefix ? modelName.displayName(raw) : raw;
+					const label = displayKey(raw, hidePrefix, mergeBadge);
 					const key = label;
 					const target = (row.models[key] =
 						row.models[key] || { tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 });
@@ -872,6 +908,21 @@ window.__ModuleLoader__.load({
 				} catch { /* 私有模式等写不进去就算了 */ }
 			};
 
+			// 开关：是否「合并徽章」——去掉模型名末尾的套餐 / 构建标记再合并（默认开）。
+			const [mergeBadge, setMergeBadge] = react.useState(() => {
+				try {
+					return window.localStorage.getItem(BADGE_STORAGE_KEY) !== "0";
+				} catch {
+					return true;
+				}
+			});
+			const toggleMergeBadge = (checked) => {
+				setMergeBadge(checked);
+				try {
+					window.localStorage.setItem(BADGE_STORAGE_KEY, checked ? "1" : "0");
+				} catch { /* 私有模式等写不进去就算了 */ }
+			};
+
 			// 日期范围：start/end（含首尾）。默认「当月」：本月 1 号到今天。
 			// 因为默认值每次渲染都从 `today` 现算，跨天（第二天）自然跟着滚到新日期；
 			// 只有用户手动选过区间（range 非 null）才固定住，重置按钮回默认。
@@ -901,7 +952,7 @@ window.__ModuleLoader__.load({
 
 			const recorded = new Map((data?.days ?? []).map((day) => [day.date, day]));
 			const keys = keysInRange(active.start, active.end);
-			const view = buildView(keys, recorded, hidePrefix);
+			const view = buildView(keys, recorded, hidePrefix, mergeBadge);
 			const models = view.models;
 			const days = view.days;
 			const total = view.total;
@@ -983,14 +1034,31 @@ window.__ModuleLoader__.load({
 				{ className: "dshu-ops" },
 				h(
 					"label",
-					{ className: "dshu-switch" },
+					{
+						className: "dshu-switch",
+						title: "规范模型名：剥掉模型名的供应商前缀（/ 或 \\ 之后那段）并统一显示大小写，再按规范名合并同名用量（opencode/glm-5.3 与 GLM-5.3 并成一行）。只影响展示与聚合，不落账。"
+					},
 					h("input", {
 						type: "checkbox",
 						checked: hidePrefix,
 						onChange: (event) => togglePrefix(event.target.checked)
 					}),
 					h("span", { className: "dshu-track" }),
-					h("span", { className: "dshu-switchLabel" }, "规范模型名（例如 opencode/glm-5.3 → GLM-5.3，并合并同名）")
+					h("span", { className: "dshu-switchLabel" }, "规范模型名")
+				),
+				h(
+					"label",
+					{
+						className: "dshu-switch",
+						title: "合并徽章（默认开）：把模型名末尾的 -TokenPlan / -Free / 构建号这类标记从统计键里去掉，同一模型的不同发行变体并成一行 —— 例如 DeepSeek-V4-Flash-0731-TokenPlan 与 DeepSeek-V4-Flash-0817-DL 都统计为 DeepSeek-V4-Flash。只影响展示与聚合，账本里记的仍是原始 model id。"
+					},
+					h("input", {
+						type: "checkbox",
+						checked: mergeBadge,
+						onChange: (event) => toggleMergeBadge(event.target.checked)
+					}),
+					h("span", { className: "dshu-track" }),
+					h("span", { className: "dshu-switchLabel" }, "合并徽章")
 				),
 				h(
 					"div",
@@ -1731,6 +1799,8 @@ window.__ModuleLoader__.load({
 			usageReadings,
 			contextReadings
 		};
+		/** 同一套纯函数自测口子：模型名规范化 / 徽章合并 / 「天 × 模型」聚合（test-model-merge.mjs）。 */
+		exports.__usage = { buildView, displayKey, badgeBase };
 		return module.exports;
 	}
 });

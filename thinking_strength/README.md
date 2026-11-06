@@ -18,8 +18,24 @@ dsh 组合包（bundle）：宿主半边（`thinking-strength.mjs`）+ Web 客�
 
 | 控件 | 行为 |
 | --- | --- |
-| 左侧「选模型」按钮 | 只显示斜杠后短名；单击打开模型列表（分组、蓝色供应商标题、白底阴影，按原始名称 a–z 排序、带当前选中标记），点某行**直达选择**（切走即生效） |
+| 左侧「选模型」按钮 | 只显示斜杠后短名；名字末尾的**徽章**单独画成小药丸（同色）；单击打开模型列表（分组、蓝色供应商标题、白底阴影，按原始名称 a–z 排序、带当前选中标记），点某行**直达选择**（切走即生效） |
 | 右侧 5 档滑块 | 自绘椭圆轨道，每档一个圆球、选中球为蓝色 #4176E6；默认 / 低 / 中 / 高 / 最大（wire 依次为 `undefined` / `low` / `medium` / `high` / `max`） |
+
+- **徽章（只改呈现，不改模型 id）**：模型名末尾的套餐 / 渠道 / 构建标记从名字里切出来单独画成
+  **浅蓝底的小药丸**（`#e8f1fe` 底、`#cfe2fb` 边、`#2f6fd0` 字，12px），按钮与列表同一套规则，
+  所有徽章不管内容是什么都用同一个颜色。规则以共享 `dsh-model-name` 的 `splitBadge`
+  为准（末尾连续的 `TokenPlan` / `Free` / `Trial` / `Beta` / `Preview` / `Demo` / `DL` 词典词，
+  以及 `0731` / `1017` / `0817` 这样的 4 位构建号，都算徽章段；整名都是标记时不切）：
+
+  | 模型 id（短名） | 画出来 |
+  | --- | --- |
+  | `DeepSeek-V4-Flash-0731-TokenPlan` | `DeepSeek-V4-Flash` + 徽章 `0731-TokenPlan` |
+  | `Qwen3.8-27B-TokenPlan` | `Qwen3.8-27B` + 徽章 `TokenPlan` |
+  | `GLM-5.3-Flash-Free` | `GLM-5.3-Flash` + 徽章 `Free` |
+  | `GLM-5.3` | `GLM-5.3`（无徽章） |
+
+  点击、收藏、`select()` 提交的仍然是**原始 model id**，一个字都不动；没装 `dsh-model-name`
+  时用文件内等价的本地兜底实现（只损失词典里那几个规范大小写）。
 
 - 模型列表直接**复用** `modelDirectories` 服务：它与内置 `/model` 弹窗、`conversation.input.model`
   共用**同一份**目录数据与同一个 `selectModel` 提交，所以本插件里切模型，别处立刻同步。
@@ -160,7 +176,7 @@ DSH 核心没有「每模型记住档位」的概念：
 - `thinking-strength.mjs` —— 宿主半边（profile 定位 + configEditor 读写 + 记忆表 + 回放 + /api）
 - `lib/client.js` —— 网页半边（自绘模型座 + 5 档滑块）
 - `test/memory.test.mjs` —— 记忆表判定 / 回放 / 读写 + `/ensure` 的回归测试（`pnpm test`）
-- `test/client.test.mjs` —— 网页半边冒烟测试（缺 `dsh-model-name` 时模块仍要加载、席位注册、渲染、失败提示）
+- `test/client.test.mjs` —— 网页半边冒烟测试（缺 `dsh-model-name` 时模块仍要加载、席位注册、渲染、徽章切分、失败提示）
 - `locale/zh.json`、`locale/en.json` —— 组合包列表里的标题 / 简介
 
 ## 安装
@@ -175,9 +191,10 @@ pnpm add D:/Project/dsplugin/thinking_strength
 **版本要求**：dsh `>=0.2.0-rc.2 <0.3.0`（`package.json` 的 `engines.dsh`；不满足时
 DSH 会把插件行强制停用）。
 
-**可选依赖 `dsh-model-name`**：模型名规范化（`ctai_my/glm-5.3` → `Glm-5.3` 之类）用它。
-装了就自动用；**没装也能跑**——`require("dsh-model-name")` 未命中模块表时会被 catch 住，
-退回一份等价的本地实现（只做大写兜底，没有它那份词典），功能不受影响。
+**可选依赖 `dsh-model-name`**：模型名规范化（`ctai_my/glm-5.3` → `Glm-5.3` 之类）与徽章切分
+规则都用它。装了就自动用；**没装也能跑**——`require("dsh-model-name")` 未命中模块表时会被
+catch 住，退回一份等价的本地实现（只做大写兜底、没有它那份词典；徽章规则本地也照抄了一份），
+功能不受影响。
 所以不需要为了本插件额外装它；想统一名字显示（它也给 usage 等插件提供同一套名字）再装：
 
 ```bash
