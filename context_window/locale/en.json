@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Context / Output Tiers",
+    "description": "Shows the current model's effective context window and max output (e.g. \"1M · 128K\") next to the composer. Open it for one-click presets (Default / 128K·16K / 262K·32K / 500K·64K / 1M·128K) or set the two independently: context 128K/200K/262K/500K/1M, output 4K/8K/16K/32K/64K/128K. Picking \"Default\" deletes the declaration and falls back to the adapter default (1M / 128K since 0.2.2). Tiers and presets live in tiers.json; state is per model and written to the profile's llm-pi-ai config."
+  }
+}

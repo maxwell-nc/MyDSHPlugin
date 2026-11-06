@@ -1,24 +1,26 @@
 {
-  "name": "dsh-context-1m",
-  "version": "1.1.0",
+  "name": "dsh-context-window",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "勾选框：为当前模型声明 / 删除 1M 上下文（contextWindow = 1,000,000 token）",
+  "description": "输入框里的「上下文 / 输出」按钮：显示当前模型生效的 contextWindow 与 maxTokens，可用快速组合（如 262K · 32K）一步切换，也可分别选档（128K/200K/262K/500K/1M 与 4K…128K）；档位表与组合走 tiers.json 配置。",
   "exports": {
-    ".": "./context-1m.mjs",
+    ".": "./context-window.mjs",
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json",
+    "./tiers.json": "./tiers.json",
     "./locale/*.json": "./locale/*.json"
   },
   "files": [
-    "context-1m.mjs",
+    "context-window.mjs",
     "lib/client.js",
     "cordis.patch.yml",
+    "tiers.json",
     "locale/*.json"
   ],
   "scripts": {
-    "test": "node test/api.test.mjs"
+    "test": "node test/api.test.mjs && node test/client.test.mjs"
   },
   "dsh": {
     "bundle": {

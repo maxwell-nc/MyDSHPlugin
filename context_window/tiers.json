@@ -1,0 +1,26 @@
+{
+  "contextTiers": [
+    { "label": "默认", "value": null },
+    { "label": "128K", "value": 128000 },
+    { "label": "200K", "value": 200000 },
+    { "label": "262K", "value": 262144 },
+    { "label": "500K", "value": 500000 },
+    { "label": "1M", "value": 1000000 }
+  ],
+  "outputTiers": [
+    { "label": "默认", "value": null },
+    { "label": "4K", "value": 4096 },
+    { "label": "8K", "value": 8192 },
+    { "label": "16K", "value": 16384 },
+    { "label": "32K", "value": 32768 },
+    { "label": "64K", "value": 65536 },
+    { "label": "128K", "value": 128000 }
+  ],
+  "presets": [
+    { "label": "默认", "context": null, "maxTokens": null },
+    { "label": "128K · 16K", "context": 128000, "maxTokens": 16384 },
+    { "label": "262K · 32K", "context": 262144, "maxTokens": 32768 },
+    { "label": "500K · 64K", "context": 500000, "maxTokens": 65536 },
+    { "label": "1M · 128K", "context": 1000000, "maxTokens": 128000 }
+  ]
+}
