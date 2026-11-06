@@ -1,6 +1,6 @@
 {
   "name": "dsh-thinking-strength",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "private": true,
   "type": "module",
   "description": "自绘模型选择座（斜杠后短名按钮 + 直达模型列表）与 5 档思考强度滑块（默认/低/中/高/最大）；按模型记住思考强度",
@@ -18,7 +18,7 @@
     "locale/*.json"
   ],
   "scripts": {
-    "test": "node test/memory.test.mjs"
+    "test": "node test/memory.test.mjs && node test/client.test.mjs"
   },
   "dsh": {
     "bundle": {
@@ -26,14 +26,24 @@
     },
     "client": {
       "platform": "web",
-      "inject": ["dsh-model-name"],
-      "external": ["dsh-model-name"]
+      "inject": [
+        "dsh-model-name"
+      ],
+      "external": [
+        "dsh-model-name"
+      ]
     }
   },
   "engines": {
     "dsh": ">=0.2.0-rc.2 <0.3.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.0.4"
+    "@deepseek-ai/cordis": "~4.0.4",
+    "dsh-model-name": "*"
+  },
+  "peerDependenciesMeta": {
+    "dsh-model-name": {
+      "optional": true
+    }
   }
 }

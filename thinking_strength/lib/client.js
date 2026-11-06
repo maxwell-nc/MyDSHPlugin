@@ -6,7 +6,44 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		var react = require("react");
 		var reactDom = require("react-dom");
-		var modelName = require("dsh-model-name");
+		/**
+		 * 模型名规范化由 dsh-model-name 提供。它不在客户端的静态种子表里：干净 profile 里
+		 * 没装它时 require 会直接抛（client-modules 未命中模块表就 throw），一旦抛在 factory
+		 * 里，整个网页半边（模型座 / 勾选框 / 滑块 / 记忆）会一起没掉，用户只看到「什么都没发生」。
+		 * 所以这里兜一层：拿不到就退回等价的本地实现，只损失「名字更好看」，功能不受影响。
+		 */
+		var modelName = (function () {
+			try {
+				return require("dsh-model-name");
+			} catch (err) {
+				console.warn("[dsh-thinking-strength] 没有 dsh-model-name，改用本地兜底的模型名显示：" + String((err && err.message) || err));
+				const shortName = (id) => {
+					if (!id) return "";
+					const parts = String(id).split(/[/\\]/u);
+					return parts[parts.length - 1].trim();
+				};
+				const cap = (s) => (s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s);
+				const splitPrefix = (text) => {
+					if (!text) return { prefix: null, base: "" };
+					const s = String(text);
+					const idx = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
+					if (idx < 0) return { prefix: null, base: s };
+					return { prefix: s.slice(0, idx), base: s.slice(idx + 1) };
+				};
+				const normalize = (name) => {
+					const s = String(name ?? "").trim();
+					if (s.length === 0) return s;
+					return s.split("-").map((seg) => cap(String(seg).replace(/^v(?=\d)/i, "V"))).join("-");
+				};
+				return {
+					shortName: shortName,
+					cap: cap,
+					splitPrefix: splitPrefix,
+					normalize: normalize,
+					displayName: (id) => normalize(shortName(id))
+				};
+			}
+		})();
 
 		//#region dsh-thinking-strength/client.css
 		const css =
@@ -137,6 +174,8 @@ window.__ModuleLoader__.load({
 			const current = state?.current ?? null;
 			const groups = state?.groups ?? [];
 			const pending = state?.pending ?? null;
+			/** 目录 store 记下的最近一次失败（如另一个窗口持有会话写入权），内置席位是走 toast 的。 */
+			const storeError = state?.error ?? null;
 
 			const modelMeta = react.useMemo(() => {
 				if (!current) return null;
@@ -203,11 +242,18 @@ window.__ModuleLoader__.load({
 				// 点到当前已在用的模型：只收起来，不必重复提交一次选择。
 				if (current !== null && current.provider === providerId && current.model === model.id) return;
 				const defaultEffort = model?.reasoning?.defaultEffort;
-				safeSelect({
+				setError(null);
+				// select 失败不会抛，只回 { ok:false, error }（例如另一个窗口持有会话写入权、
+				// 或模型不可用）；这里必须自己接住并显示，否则用户只看到「列表收起、模型没变」。
+				Promise.resolve(safeSelect({
 					provider: providerId,
 					model: model.id,
 					...(defaultEffort === undefined ? {} : { reasoningEffort: defaultEffort })
-				});
+				}))
+					.then((result) => {
+						if (result && !result.ok) setError((result.error && result.error.message) || "切换模型失败");
+					})
+					.catch((err) => setError(String((err && err.message) || err)));
 			};
 
 			const setTier = (index) => {
@@ -350,8 +396,8 @@ window.__ModuleLoader__.load({
 					label,
 					h("span", { key: "caret", className: "dts-caret" }, open ? "▲" : "▼")
 				]),
-				error
-					? h("span", { key: "err", className: "dts-err", title: error }, "!")
+				(error || storeError)
+					? h("span", { key: "err", className: "dts-err", title: error || storeError }, "!")
 					: null,
 				h("div", { key: "slider", className: "dts-slider", title: TIERS.map((t) => t.label).join(" / ") }, [
 					h("div", {
@@ -410,6 +456,13 @@ window.__ModuleLoader__.load({
 			const [error, setError] = react.useState(null);
 
 			const requestKey = projected ? projected.provider + "\u0000" + projected.model : "\u0000default";
+			/** 滑块的 /ensure 缓存键（本页已确认该模型声明过 5 档，之后可跳过重复写盘）。 */
+			const currentKey = current && current.provider && current.model
+				? current.provider + "\u0000" + current.model
+				: requestKey;
+			// 勾选框状态 = 宿主读到的声明状态，或滑块刚用 /ensure 补过声明（同一个模型）。
+			// 不只看 requestKey：投影为空时 current 来自宿主的默认模型回填。
+			const declared = has || ensuredKeys.has(currentKey);
 
 			react.useEffect(() => {
 				let cancelled = false;
@@ -425,6 +478,9 @@ window.__ModuleLoader__.load({
 						if (d && d.ok && d.provider && d.model) {
 							setFallback({ provider: d.provider, model: d.model });
 							setHas(!!d.has);
+							// 勾选框读到的声明状态顺便校准滑块的 /ensure 缓存（两边是同一模型）。
+							const key = d.provider + "\u0000" + d.model;
+							if (d.has) ensuredKeys.add(key); else ensuredKeys.delete(key);
 						} else {
 							setError((d && d.error) || "读取失败");
 						}
@@ -438,7 +494,7 @@ window.__ModuleLoader__.load({
 				if (!current || busy || loading) return;
 				setBusy(true);
 				setError(null);
-				const enabled = !has;
+				const enabled = !declared;
 				fetch(API_SET, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
@@ -446,8 +502,12 @@ window.__ModuleLoader__.load({
 				})
 					.then((r) => r.json())
 					.then((d) => {
-						if (d && d.ok) setHas(!!d.enabled);
-						else setError((d && d.error) || "设置失败");
+						if (d && d.ok) {
+							setHas(!!d.enabled);
+							// 取消勾选会删掉 reasoningEfforts 声明 → 该模型的 /ensure 缓存立即失效。
+							// 不清的话再点非默认档会跳过 /ensure 直接 select，被宿主拒，只能刷新页面。
+							if (d.enabled) ensuredKeys.add(currentKey); else ensuredKeys.delete(currentKey);
+						} else setError((d && d.error) || "设置失败");
 					})
 					.catch(() => setError("设置失败"))
 					.finally(() => setBusy(false));
@@ -458,17 +518,17 @@ window.__ModuleLoader__.load({
 			const title =
 				error ||
 				current.model +
-					(has
+					(declared
 						? " · 已声明 reasoningEfforts（5 档开关）"
 						: " · 未声明 reasoningEfforts · 勾选后写入 llm-pi-ai 配置");
 
 			return h(
 				"span",
-				{ className: "dts-check" + (has ? " dts-check-on" : ""), title: title },
+				{ className: "dts-check" + (declared ? " dts-check-on" : ""), title: title },
 				h("span", null, "思考"),
 				h("input", {
 					type: "checkbox",
-					checked: has,
+					checked: declared,
 					disabled: busy || loading,
 					onChange: toggle
 				})

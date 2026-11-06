@@ -96,7 +96,13 @@ DSH 核心没有「每模型记住档位」的概念：
 }
 ```
 
-**删掉这个文件就清空记忆**；取消勾选（`/set enabled=false`）会顺手清掉该模型的记忆。
+清空记忆：**先删文件、再重启 dsh**。记忆表在进程内只从磁盘读一次（载入后以内存为准，
+每次改动整表写回），所以运行中删掉文件**不算数**——下一次改档会把内存里那份（含你删掉的条目）
+重新写回磁盘。要立刻生效又不重启的话：先删文件，再退出 dsh 重开即可；只删文件不重启，
+旧的档位仍会继续被回放。
+
+取消勾选（`/set enabled=false`）会顺手清掉该模型的记忆，并让本页的 `/ensure` 缓存失效
+（否则再点非默认档会跳过「补全声明」这一步，被宿主拒掉）。
 
 不用 `localStorage`：Desktop 用 `--port 0` 启动，每次重启端口变了 origin 也就变了，浏览器存储留不住。
 
@@ -134,6 +140,11 @@ DSH 核心没有「每模型记住档位」的概念：
 切换模型时滑块状态随 `modelSelection` 投影自动更新、按模型独立；出错（模型不在 llm-pi-ai
 配置里、`configEditor` 不可用等）会在控件旁用「!」提示，悬停可见具体原因。
 
+**在自绘列表里选模型失败也有提示**：`select()` 失败不抛异常，只回 `{ok:false, error}`
+（例如另一个窗口正持有该会话的写入权 → `session/writer-held`、模型不可用 →
+`session/model-unavailable`）。这些结果和目录 store 里的 `error` 都会汇到座位旁那个
+「!」上，不会再出现「列表收起、模型没变、什么都不说」。
+
 ## 生效时机
 
 写入走 `configEditor.edit()`，它在同一个调用里就调和了 Loader，所以档位声明通常**立刻**生效。
@@ -149,6 +160,7 @@ DSH 核心没有「每模型记住档位」的概念：
 - `thinking-strength.mjs` —— 宿主半边（profile 定位 + configEditor 读写 + 记忆表 + 回放 + /api）
 - `lib/client.js` —— 网页半边（自绘模型座 + 5 档滑块）
 - `test/memory.test.mjs` —— 记忆表判定 / 回放 / 读写 + `/ensure` 的回归测试（`pnpm test`）
+- `test/client.test.mjs` —— 网页半边冒烟测试（缺 `dsh-model-name` 时模块仍要加载、席位注册、渲染、失败提示）
 - `locale/zh.json`、`locale/en.json` —— 组合包列表里的标题 / 简介
 
 ## 安装
@@ -162,6 +174,15 @@ pnpm add D:/Project/dsplugin/thinking_strength
 
 **版本要求**：dsh `>=0.2.0-rc.2 <0.3.0`（`package.json` 的 `engines.dsh`；不满足时
 DSH 会把插件行强制停用）。
+
+**可选依赖 `dsh-model-name`**：模型名规范化（`ctai_my/glm-5.3` → `Glm-5.3` 之类）用它。
+装了就自动用；**没装也能跑**——`require("dsh-model-name")` 未命中模块表时会被 catch 住，
+退回一份等价的本地实现（只做大写兜底，没有它那份词典），功能不受影响。
+所以不需要为了本插件额外装它；想统一名字显示（它也给 usage 等插件提供同一套名字）再装：
+
+```bash
+pnpm add D:/Project/dsplugin/dsh-model-name
+```
 
 ## 环境变量（可选）
 
