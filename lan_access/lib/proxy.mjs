@@ -325,8 +325,14 @@ export function createProxy(options) {
     return { action: 'allow' }
   }
 
-  /** 发一个拒绝页。 */
+  /** 客户端已经走了（刷新 / 关标签 / 断网）：这时再往 res 上写会抛流错误。 */
+  function clientGone(res) {
+    return res.destroyed === true || res.writableEnded === true
+  }
+
+  /** 发一个拒绝页；客户端已经走了就什么都不做。 */
   function deny(res, verdict) {
+    if (clientGone(res) || res.headersSent) return
     const body = errorPage(verdict.title, verdict.detail)
     res.writeHead(verdict.status, {
       'content-type': 'text/html; charset=utf-8',
@@ -353,6 +359,9 @@ export function createProxy(options) {
 
   /** 普通 HTTP 请求转发。 */
   async function handleRequest(req, res) {
+    // 客户端中途断开时 Node 会在 res 上发 'error'；没有监听器就是一个 uncaught
+    // 'error'，会把整个宿主进程带走。
+    res.on('error', () => {})
     const verdict = gate(req)
     if (verdict.action === 'deny') {
       deny(res, verdict)
@@ -381,6 +390,7 @@ export function createProxy(options) {
     }
 
     const forward = (upstreamCookie, retried) => {
+      if (clientGone(res)) return
       const upstream = http.request(
         {
           host: UPSTREAM_HOST,
@@ -390,6 +400,10 @@ export function createProxy(options) {
           headers: rewriteHeaders(req.headers, upstreamCookie, false)
         },
         (response) => {
+          if (clientGone(res)) {
+            response.destroy()
+            return
+          }
           const status = response.statusCode ?? 502
           // cookie 过期/进程换了 token 时上游会 401/403：重换一次再试
           if ((status === 401 || status === 403) && !retried && isRetryable(req)) {
@@ -406,18 +420,33 @@ export function createProxy(options) {
             return
           }
           res.writeHead(status, responseHeaders(response.headers))
-          pipeline(response, res, () => {})
+          // res 刚被客户端掐掉时 pipeline 会**同步抛** ERR_STREAM_UNABLE_TO_PIPE
+          //（"Cannot pipe to a closed or destroyed stream"）。这个异常从
+          // http.request 的回调里逃出去就是进程级 fatal（宿主直接退出），必须就地接住。
+          try {
+            pipeline(response, res, () => {})
+          } catch (error) {
+            response.destroy()
+            log(`转发响应中断：${String(req.method)} ${String(req.url)}：${String(error?.message ?? error)}`)
+          }
         }
       )
       upstream.on('error', (error) => {
         log(`转发 ${String(req.method)} ${String(req.url)} 失败：${String(error?.message ?? error)}`)
+        if (clientGone(res)) return
         if (!res.headersSent) {
           deny(res, { status: 502, title: '连不上本机的 dsh 服务', detail: '请稍后重试，或重启服务。' })
         } else {
           res.destroy()
         }
       })
-      req.pipe(upstream)
+      try {
+        req.pipe(upstream)
+      } catch (error) {
+        // 上游请求刚建好就被销毁时 pipe 同样会同步抛。
+        upstream.destroy()
+        log(`转发 ${String(req.method)} ${String(req.url)} 请求体失败：${String(error?.message ?? error)}`)
+      }
     }
 
     forward(cookie, false)
@@ -462,7 +491,15 @@ export function createProxy(options) {
       return
     }
 
+    if (socket.destroyed) return
+
     const upstream = net.connect(upstreamPort, UPSTREAM_HOST, () => {
+      // 等 cookie 的那一下客户端可能已经走了：别在死 socket 上握手。
+      if (socket.destroyed || upstream.destroyed) {
+        upstream.destroy()
+        socket.destroy()
+        return
+      }
       const headers = rewriteHeaders(req.headers, cookie, true)
       const lines = [`GET ${String(req.url)} HTTP/1.1`]
       for (const [name, value] of Object.entries(headers)) {
