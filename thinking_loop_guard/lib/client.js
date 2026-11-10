@@ -85,7 +85,7 @@ window.__ModuleLoader__.load({
 		const state = {
 			panel: null, btn: null, badge: null, fallbackRoot: null,
 			open: false, timer: null, pulseTimer: null, fallbackTimer: null,
-			observer: null, sweepTimer: null, data: null, busy: false, anchored: false,
+			observer: null, sweepTimer: null, data: null, busy: false, anchored: false, card: null,
 			ackHits: 0, sessions: null, uiWorkspace: null, pendingOpen: null, ackedChild: null, openBusy: false
 		};
 
@@ -116,10 +116,17 @@ window.__ModuleLoader__.load({
 			return btn;
 		}
 
+		/** 卡片是否真的显示中：只查样式，不查几何（offsetParent 会按现在文档的脏状态强制整篇布局）。 */
+		function isShown(card) {
+			if (!card.isConnected) return false;
+			if (typeof card.checkVisibility === "function") return card.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true });
+			return true;
+		}
+
 		/** 当前可见的输入框卡片（多会话视图时取最后一个可见的）。 */
 		function visibleCards() {
 			const cards = Array.from(document.querySelectorAll("[data-composer-card]"));
-			const visible = cards.filter((card) => card.offsetParent !== null);
+			const visible = cards.filter(isShown);
 			return visible.length > 0 ? [visible[visible.length - 1]] : [];
 		}
 
@@ -151,6 +158,7 @@ window.__ModuleLoader__.load({
 		function sweep() {
 			const cards = visibleCards();
 			if (cards.length === 0) return;
+			state.card = cards[0];
 			const row = findRow(cards[0]);
 			if (row === null) return;
 			const btn = state.btn !== null && state.btn !== undefined && state.btn.isConnected ? state.btn : buildBtn();
@@ -363,6 +371,25 @@ window.__ModuleLoader__.load({
 			render();
 		}
 
+		/**
+		 * 这批变动值不值得重扫。守卫钮已经挂好的时候，只有落在输入框卡片里的变动才需要管：
+		 * 流式输出、翻历史页都在往 body 里塞节点，三万节点的插入会让"每批都扫"变成
+		 * "每批都强制整篇样式+布局一次"。卡片/按钮被 React 换掉时这里会放行（isConnected 变假），
+		 * 另外 poll 每 2.5 秒也会无条件扫一次，兜住多会话视图下换卡片的情况。
+		 */
+		function touchesComposer(records) {
+			const card = state.card;
+			const anchored = card !== null && card !== undefined && card.isConnected &&
+				state.btn !== null && state.btn !== undefined && state.btn.isConnected;
+			if (!anchored) return true;
+			for (const record of records) {
+				const target = record.target;
+				const node = target instanceof Element ? target : target.parentElement;
+				if (node !== null && node !== undefined && card.contains(node)) return true;
+			}
+			return false;
+		}
+
 		/** 挂界面。热重载时先把上一份撤干净（两套定时器/两份面板会叠在一起）。 */
 		function install() {
 			const previous = window.__DSH_LOOP_GUARD__;
@@ -387,7 +414,8 @@ window.__ModuleLoader__.load({
 			state.fallbackTimer = setTimeout(showFallback, FALLBACK_MS);
 			// React 会重渲染输入框：观察 DOM，80ms 攒一批后把按钮归位
 			state.observer = typeof MutationObserver === "function"
-				? new MutationObserver(() => {
+				? new MutationObserver((records) => {
+					if (!touchesComposer(records)) return;
 					if (state.sweepTimer !== null) return;
 					state.sweepTimer = setTimeout(() => {
 						state.sweepTimer = null;
@@ -436,6 +464,7 @@ window.__ModuleLoader__.load({
 					state.open = false;
 					state.data = null;
 					state.anchored = false;
+					state.card = null;
 				}
 			};
 		}
