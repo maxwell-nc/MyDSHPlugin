@@ -1,17 +1,17 @@
 {
-  "name": "dsh-titlebar-perf",
+  "name": "dsh-stuck-fix",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "dsh 桌面端标题栏取色性能修补：把 preload 的取色探针摘出文档，消掉每次 DOM 变更触发的整篇强制重排（仅 Windows 桌面端）",
+  "description": "dsh 桌面端卡死引信拆除：preload 取色观察者在 head 变动风暴里会把主线程占死，这里在风暴起势时替它跑收尾（仅 Windows 桌面端）",
   "exports": {
-    ".": "./titlebar-perf.mjs",
+    ".": "./stuck-fix.mjs",
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
-    "titlebar-perf.mjs",
+    "stuck-fix.mjs",
     "lib/client.js",
     "cordis.patch.yml"
   ],
