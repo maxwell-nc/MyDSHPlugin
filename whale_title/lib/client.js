@@ -167,22 +167,81 @@ window.__ModuleLoader__.load({
 			guard.on = true;
 		}
 
+		/**
+		 * 标题写入预算。
+		 *
+		 * 为什么要这个：改 <title> 不是"画个看不见的标题"，而是给 head 打脏标记 ——
+		 * 这个应用的 CSS 里有 67 条 :has() 规则（html/head/body 上都有），Chrome 的
+		 * :has() 失效判定是"把相关子树整体标脏"，于是每改一次标题都要整篇重算样式。
+		 * 2026-11-11 实测（35k 节点）：改一次之后强制布局从 0.02ms 变成 287ms。
+		 * 180ms 一帧 × 5.5 帧/秒 = 1.6 秒/秒，主线程直接被吃穿（帧率掉到 2fps）。
+		 *
+		 * 所以这里按"实测成本"自适应降频：一次写入最多占 1/8 的主线程预算，
+		 * 其余留给页面自己。文档小的时候照旧 180ms 一帧，文档涨了就自动变慢。
+		 */
+		var budget = { lastAt: 0, lastText: null, cost: 0.3, sinceProbe: 0, interval: FRAME_MS };
+
+		/** 量一次"写标题 + 随后整篇重算"的真实耗时；每 8 次写入量一次。 */
+		function measureCost() {
+			try {
+				var t0 = performance.now();
+				void document.body.offsetHeight;
+				var cost = performance.now() - t0;
+				if (cost >= 0 && cost < 8000) {
+					budget.cost = budget.cost * 0.6 + cost * 0.4;
+					budget.interval = Math.max(FRAME_MS, Math.min(5000, Math.round(budget.cost * 8)));
+				}
+			} catch (error) {
+				// 量不到就按上一轮的节奏继续
+			}
+		}
+
 		/** 画一帧。帧号来自帧源（SSE 或本地降级计时）。 */
 		function showFrame(k) {
+			// 只在"人在看"以外的时候画：最小化 / 被完全遮住 / 丢了焦点。
+			// 这个动画的用途是切走以后在任务栏 / Alt-Tab 里确认任务还在跑；人正盯着界面看的时候
+			// 画它纯属浪费主线程（一次写入 = 一次整篇样式重算，35k 节点实测 287ms）。
+			if (doc.hidden !== true && document.hasFocus()) return;
 			var text = frameOf(k);
+			// 同一帧文本不重复写：重复写等于白白触发一次整篇重算
+			if (text === budget.lastText) return;
+			var now = performance.now();
+			if (budget.lastAt !== 0 && now - budget.lastAt < budget.interval) return;
 			beginRun();
+			budget.lastAt = now;
+			budget.lastText = text;
 			try {
 				if (guard.installed) guard.setter(text);
 				else doc.title = text;
 			} catch (error) {
 				// 上一帧写失败通常是页面在销毁边缘；下一帧再试
 			}
+			if (budget.sinceProbe > 0) budget.sinceProbe--;
+			else {
+				budget.sinceProbe = 8;
+				measureCost();
+			}
+		}
+
+		/**
+		 * 可见性切换：回到前台立刻把标题还给官方（鲸鱼帧只属于后台），
+		 * 切到后台则清掉预算，让下一帧立刻画出来。
+		 */
+		function onPresenceChange() {
+			if (doc.hidden !== true && document.hasFocus() && guard.on) {
+				try { guard.setter(guard.intended); } catch (error) { /* 页面在销毁边缘 */ }
+			}
+			budget.lastAt = 0;
+			budget.lastText = null;
 		}
 
 		/** 结束活动：标题恢复成官方当前意图。 */
 		function endRun() {
 			if (!guard.on) return;
 			guard.on = false;
+			// 下一轮开始的第一帧要能立刻画出来，别被上一轮的预算卡住
+			budget.lastAt = 0;
+			budget.lastText = null;
 			try {
 				if (guard.installed) guard.setter(guard.intended);
 				else if (bareIntended !== null) doc.title = bareIntended;
@@ -292,6 +351,10 @@ window.__ModuleLoader__.load({
 		function start() {
 			installGuard();
 			connectStream();
+			// 可见性 + 焦点：两者任一"离开"就开始画，回到"看得见且有焦点"就还标题
+			document.addEventListener("visibilitychange", onPresenceChange);
+			window.addEventListener("blur", onPresenceChange);
+			window.addEventListener("focus", onPresenceChange);
 			if (watchdogHandle == null) {
 				watchdogHandle = window.setInterval(watchdog, POLL_MS);
 			}
@@ -307,6 +370,9 @@ window.__ModuleLoader__.load({
 				window.clearInterval(watchdogHandle);
 				watchdogHandle = null;
 			}
+			document.removeEventListener("visibilitychange", onPresenceChange);
+			window.removeEventListener("blur", onPresenceChange);
+			window.removeEventListener("focus", onPresenceChange);
 			endRun();
 			uninstallGuard();
 		}
