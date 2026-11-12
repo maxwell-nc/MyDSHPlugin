@@ -80,7 +80,7 @@ const API_SET = '/api/dsh-thinking-strength.set'
 const API_ENSURE = '/api/dsh-thinking-strength.ensure'
 
 /**
- * 勾选 / 滑块声明时补全的默认档位：off 不传参（= 上游默认），其余档位直发 wire 值。
+ * 滑块声明时补全的默认档位：off 不传参（= 上游默认），其余档位直发 wire 值。
  * 5 档滑块（默认/低/中/高/最大）对应 low/medium/high/max；medium 是 pi-ai 的
  * 标准 thinking level（THINKING_LEVELS 含 medium），所以一并补进声明。
  */
@@ -322,7 +322,7 @@ function forgetEffort(key) {
   }
 }
 
-/** 该错误是否表示「模型不接受这个档位」（配置变了 / 勾选框被取消）。 */
+/** 该错误是否表示「模型不接受这个档位」（配置变了 / 声明被「默认」档撤掉）。 */
 function isUnsupportedEffort(error) {
   const message = String(error?.message ?? error)
   return error?.code === 'UNSUPPORTED_REASONING_EFFORT'

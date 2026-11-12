@@ -1,6 +1,6 @@
 /**
  * 回归测试：用假的 cordis 上下文驱动 dsh-thinking-strength 的 host 半边，
- * 验证「按模型记住思考强度」的判定/回放，以及勾选框走 configEditor 的读写。
+ * 验证「按模型记住思考强度」的判定/回放，以及滑块「默认」档撤声明走 configEditor 的读写。
  *
  *   node test/memory.test.mjs
  */

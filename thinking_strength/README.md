@@ -7,8 +7,10 @@ dsh 组合包（bundle）：宿主半边（`thinking-strength.mjs`）+ Web 客�
 
 1. **自绘模型选择座** —— 替换输入框里内置的模型选择按钮，左侧是「选模型」按钮，
    只显示斜杠后的短名（`opencode/glm-5.3 → glm-5.3`），单击打开**复用**共享目录数据的模型列表（直达选择）。
-2. **5 档思考强度滑块** —— 点击模型按钮右侧的滑块，按「默认 / 低 / 中 / 高 / 最大」切换。
-   输入框右侧另保留一个「思考」**勾选框**：勾上即为当前模型声明 `reasoningEfforts`，取消则删除声明。
+2. **5 档思考强度滑块** —— 模型按钮右侧的滑块是唯一的思考控件：**有多少档就有多强**，
+   按「默认 / 低 / 中 / 高 / 最大」切换。**选任意非「默认」档 = 开启思考**（自动为模型声明
+   `reasoningEfforts` 并以该强度发出）；**选「默认」档 = 关闭思考**（撤掉声明 + 清该模型档位记忆，
+   请求不带任何思考参数、交回上游默认）。没有单独的开关按钮。
 3. **按模型记住思考强度** —— 切换模型再切回来，自动带回你上次选的档位，
    不再被重置成该模型的默认档。
 
@@ -39,10 +41,16 @@ dsh 组合包（bundle）：宿主半边（`thinking-strength.mjs`）+ Web 客�
 
 - 模型列表直接**复用** `modelDirectories` 服务：它与内置 `/model` 弹窗、`conversation.input.model`
   共用**同一份**目录数据与同一个 `selectModel` 提交，所以本插件里切模型，别处立刻同步。
-- 「默认」档 = 不显式发 `reasoning_effort`（用模型默认档）。
-- 选非默认档（低/中/高/最大）时，先调 `/ensure` 把当前模型在 llm-pi-ai 配置里的
+
+**滑块 = 思考开关 + 强度合一（没有单独的「思考」勾选框）：**
+
+- 「默认」档（唯一不算「打开」的档）＝ 关闭思考：调 `/set enabled=false`
+  **删掉当前模型的 `reasoningEfforts` 声明**、清掉该模型的档位记忆，然后不发显式档位
+  （wire 省略 → 请求不带任何思考参数 → 交回上游/模型自身默认）。选它会让本页的 `/ensure`
+  缓存立即失效，所以再点非默认档会重新补声明。
+- 选非默认档（低/中/高/最大）＝ 开启思考：先调 `/ensure` 把当前模型在 llm-pi-ai 配置里的
   `reasoningEfforts` **补全成完整 5 档** `{ off: null, low: low, medium: medium, high: high, max: max }`
-  （medium 是 pi-ai 的 `THINKING_LEVELS` 标准档，缺了它「中」会发不出去），再设档。
+  （medium 是 pi-ai 的 `THINKING_LEVELS` 标准档，缺了它「中」会发不出去），再以该档强度设档。
 
 ### 为什么改的是「配置文件」而不是「请求参数」
 
@@ -117,7 +125,7 @@ DSH 核心没有「每模型记住档位」的概念：
 重新写回磁盘。要立刻生效又不重启的话：先删文件，再退出 dsh 重开即可；只删文件不重启，
 旧的档位仍会继续被回放。
 
-取消勾选（`/set enabled=false`）会顺手清掉该模型的记忆，并让本页的 `/ensure` 缓存失效
+滑块选「默认」档（`/set enabled=false`）会顺手清掉该模型的记忆，并让本页的 `/ensure` 缓存失效
 （否则再点非默认档会跳过「补全声明」这一步，被宿主拒掉）。
 
 不用 `localStorage`：Desktop 用 `--port 0` 启动，每次重启端口变了 origin 也就变了，浏览器存储留不住。
@@ -145,13 +153,14 @@ DSH 核心没有「每模型记住档位」的概念：
 - `/set` 已经在目标状态时不写盘；`/ensure` 只在该模型还差档位时写盘，两者都幂等。
 - 记忆表与回放：`session/event`（只看 `model/selection`）+ `sessionController.selectModel`。
 
-**网页半边**（`lib/client.js`）是自绘模型座 + 5 档滑块，走三个 /api：
+**网页半边**（`lib/client.js`）是自绘模型座 + 5 档滑块，客户端只调其中两个 /api：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/dsh-thinking-strength.state?provider=&model=` | `{ok, provider, model, has, profile, patch}`（`has` = 是否已声明） |
-| POST | `/api/dsh-thinking-strength.set` | `{provider, model, enabled}` 补全 / 删除，回 `{ok, changed, ...}` |
+| POST | `/api/dsh-thinking-strength.set` | `{provider, model, enabled}` 补全 / 删除声明。滑块选非默认档补全，选「默认」档（`enabled:false`）**删除**，回 `{ok, changed, ...}` |
 | POST | `/api/dsh-thinking-strength.ensure` | `{provider, model}` 把声明补全成完整 5 档（含 medium），回 `{ok, changed, ...}` |
+
+（`/api/dsh-thinking-strength.state` 仍由宿主注册，供外部读取当前模型的声明状态，UI 不再使用。）
 
 切换模型时滑块状态随 `modelSelection` 投影自动更新、按模型独立；出错（模型不在 llm-pi-ai
 配置里、`configEditor` 不可用等）会在控件旁用「!」提示，悬停可见具体原因。
@@ -217,7 +226,8 @@ pnpm add D:/Project/dsplugin/dsh-model-name
   「宿主的 configEditor 服务不可用」而不是静默失败。
 - 若 llm-pi-ai 的配置被更上层（home patch / 命令行覆盖 / settings 文档）压住，
   `configEditor.edit()` 会拒绝写入并把原因回给提示，磁盘上不会留下半成品。
-- 「默认」档不删声明：它只是不发显式档位；模型仍保留已声明的 5 档。但**会删掉该模型的
-  档位记忆**（同路由的 `model/selection` 不带 `reasoningEffort` = 用户选了默认档），
-  不然切走再切回时旧档位会被回放回来，悄悄盖掉这次的选择。
+- 参数层无法强制「关」：滑块「默认」档 = 不发显式档位，请求不带任何思考参数、交回上游/模型
+  自身默认。**它不是字节级的强制关闭** —— 若某个上游默认就思考，选「默认」它仍会思考（这是
+  pi-ai 这一层的固有行为，`off` 档与「不设」在 wire 上是同一个意思）。「默认」同时会**删掉该模型
+  的 `reasoningEfforts` 声明**和**档位记忆**，让模型回到无思考能力的状态。
 - 任何异常都吞掉 / 通过响应里的 `error` 返回，插件崩了不连带 dsh 起不来。

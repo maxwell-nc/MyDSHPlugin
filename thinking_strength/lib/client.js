@@ -9,7 +9,7 @@ window.__ModuleLoader__.load({
 		/**
 		 * 模型名规范化由 dsh-model-name 提供。它不在客户端的静态种子表里：干净 profile 里
 		 * 没装它时 require 会直接抛（client-modules 未命中模块表就 throw），一旦抛在 factory
-		 * 里，整个网页半边（模型座 / 勾选框 / 滑块 / 记忆）会一起没掉，用户只看到「什么都没发生」。
+		 * 里，整个网页半边（模型座 / 滑块 / 记忆）会一起没掉，用户只看到「什么都没发生」。
 		 * 所以这里兜一层：拿不到就退回等价的本地实现，只损失「名字更好看」，功能不受影响。
 		 */
 		var modelName = (function () {
@@ -115,10 +115,7 @@ window.__ModuleLoader__.load({
 			".dts-dot.dts-on{background:#4176E6}" +
 			".dts-dot.dts-on.dts-hover{background:#5b8ef5}" +
 			".dts-tier{font-size:11px;color:var(--dsw-alias-label-secondary,#5b6478);min-width:22px;text-align:center}" +
-			".dts-err{color:var(--dsw-alias-state-error-primary,#e5484d);font-size:11px;line-height:1}" +
-			".dts-check{display:inline-flex;align-items:center;gap:6px;height:26px;font-size:12px;line-height:1;color:var(--dsw-alias-label-secondary,#5b6478);cursor:pointer}" +
-			".dts-check.dts-check-on{color:var(--dsw-alias-state-business-primary,#3d7eff)}" +
-			".dts-check input{width:14px;height:14px;margin:0;accent-color:var(--dsw-alias-state-business-primary,#3d7eff);cursor:pointer}";
+			".dts-err{color:var(--dsw-alias-state-error-primary,#e5484d);font-size:11px;line-height:1}";
 		const tagId = "dsh-thinking-strength/client.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -132,7 +129,6 @@ window.__ModuleLoader__.load({
 		//#region dsh-thinking-strength/client/index.js
 		const h = react.createElement;
 		const container = document.body;
-		const API_STATE = "/api/dsh-thinking-strength.state";
 		const API_SET = "/api/dsh-thinking-strength.set";
 		const API_ENSURE = "/api/dsh-thinking-strength.ensure";
 
@@ -300,6 +296,7 @@ window.__ModuleLoader__.load({
 				if (!current || busy) return;
 				const tier = TIERS[index];
 				if (tier === undefined) return;
+				const key = current.provider + "\u0000" + current.model;
 				setBusy(true);
 				setError(null);
 				const apply = () => {
@@ -314,11 +311,27 @@ window.__ModuleLoader__.load({
 						})
 						.catch((err) => { setError(String((err && err.message) || err)); setBusy(false); });
 				};
-				// 「默认」档不需要声明；其余档先确保模型声明了 5 档（含 medium）再设档。
-				if (index === 0) { apply(); return; }
-				// 同一模型本页已确保过完整 5 档，就直接设档，跳过 /ensure —— 否则每次点击都会
-				// 走 configEditor 写入 + Loader 热重载，造成切换延迟 / 卡顿。
-				const key = current.provider + "\u0000" + current.model;
+				// 「默认」档 = 关闭思考：撤掉 reasoningEfforts 宣言（宿主顺带清掉该模型的档位记忆），
+				// 并不发显式档位（wire 省略 → 走上游默认）。撤宣言后本页的 /ensure 缓存立即失效，
+				// 否则下次点非默认档会跳过「补声明」直接被宿主拒掉。
+				if (index === 0) {
+					fetch(API_SET, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ provider: current.provider, model: current.model, enabled: false })
+					})
+						.then((r) => r.json())
+						.then((data) => {
+							if (data && data.ok) { ensuredKeys.delete(key); apply(); }
+							else setError((data && data.error) || "关闭思考失败");
+							setBusy(false);
+						})
+						.catch(() => { setError("关闭思考失败"); setBusy(false); });
+					return;
+				}
+				// 非默认档：先确保模型声明了完整 5 档（含 medium）再设档。
+				// 同一模型本页已确保过，就直接设档跳过 /ensure —— 否则每次点击都会走
+				// configEditor 写入 + Loader 热重载，造成切换延迟 / 卡顿。
 				if (ensuredKeys.has(key)) { apply(); return; }
 				fetch(API_ENSURE, {
 					method: "POST",
@@ -493,101 +506,6 @@ window.__ModuleLoader__.load({
 
 		const inject = ["slots", "modelDirectories", "sessions", "remote", "remote.session"];
 
-		/**
-		 * 输入框右侧的「思考」勾选框：勾选状态 = 当前模型在 llm-pi-ai 配置里是否
-		 * 声明了 reasoningEfforts。勾上 → 补全 5 档声明；取消 → 删除声明。
-		 */
-		function ThinkingStrengthCheckbox({ useProjection }) {
-			const selection = useProjection("modelSelection");
-			const projected = selection?.next ?? selection?.lastUsed ?? null;
-			const [fallback, setFallback] = react.useState(null);
-			const current = projected ?? fallback;
-
-			const [has, setHas] = react.useState(false);
-			const [busy, setBusy] = react.useState(false);
-			const [loading, setLoading] = react.useState(false);
-			const [error, setError] = react.useState(null);
-
-			const requestKey = projected ? projected.provider + "\u0000" + projected.model : "\u0000default";
-			/** 滑块的 /ensure 缓存键（本页已确认该模型声明过 5 档，之后可跳过重复写盘）。 */
-			const currentKey = current && current.provider && current.model
-				? current.provider + "\u0000" + current.model
-				: requestKey;
-			// 勾选框状态 = 宿主读到的声明状态，或滑块刚用 /ensure 补过声明（同一个模型）。
-			// 不只看 requestKey：投影为空时 current 来自宿主的默认模型回填。
-			const declared = has || ensuredKeys.has(currentKey);
-
-			react.useEffect(() => {
-				let cancelled = false;
-				setLoading(true);
-				setError(null);
-				const qs = projected
-					? "provider=" + encodeURIComponent(projected.provider) + "&model=" + encodeURIComponent(projected.model)
-					: "";
-				fetch(API_STATE + (qs ? "?" + qs : ""), { cache: "no-store" })
-					.then((r) => r.json())
-					.then((d) => {
-						if (cancelled) return;
-						if (d && d.ok && d.provider && d.model) {
-							setFallback({ provider: d.provider, model: d.model });
-							setHas(!!d.has);
-							// 勾选框读到的声明状态顺便校准滑块的 /ensure 缓存（两边是同一模型）。
-							const key = d.provider + "\u0000" + d.model;
-							if (d.has) ensuredKeys.add(key); else ensuredKeys.delete(key);
-						} else {
-							setError((d && d.error) || "读取失败");
-						}
-					})
-					.catch(() => { if (!cancelled) setError("读取失败"); })
-					.finally(() => { if (!cancelled) setLoading(false); });
-				return () => { cancelled = true; };
-			}, [requestKey]);
-
-			const toggle = () => {
-				if (!current || busy || loading) return;
-				setBusy(true);
-				setError(null);
-				const enabled = !declared;
-				fetch(API_SET, {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ provider: current.provider, model: current.model, enabled })
-				})
-					.then((r) => r.json())
-					.then((d) => {
-						if (d && d.ok) {
-							setHas(!!d.enabled);
-							// 取消勾选会删掉 reasoningEfforts 声明 → 该模型的 /ensure 缓存立即失效。
-							// 不清的话再点非默认档会跳过 /ensure 直接 select，被宿主拒，只能刷新页面。
-							if (d.enabled) ensuredKeys.add(currentKey); else ensuredKeys.delete(currentKey);
-						} else setError((d && d.error) || "设置失败");
-					})
-					.catch(() => setError("设置失败"))
-					.finally(() => setBusy(false));
-			};
-
-			if (!current || !current.provider || !current.model) return null;
-
-			const title =
-				error ||
-				current.model +
-					(declared
-						? " · 已声明 reasoningEfforts（5 档开关）"
-						: " · 未声明 reasoningEfforts · 勾选后写入 llm-pi-ai 配置");
-
-			return h(
-				"span",
-				{ className: "dts-check" + (declared ? " dts-check-on" : ""), title: title },
-				h("span", null, "思考"),
-				h("input", {
-					type: "checkbox",
-					checked: declared,
-					disabled: busy || loading,
-					onChange: toggle
-				})
-			);
-		}
-
 		function apply(ctx) {
 			// 与内置 ui-model-selection 保持一致：显式注入 remote / remote.session，
 			// 否则从本插件上下文调 directoryFor 时嵌套服务 remote.session 走不到注入链，
@@ -648,12 +566,6 @@ window.__ModuleLoader__.load({
 							}
 						},
 						ThinkingModelSeat
-					)
-				);
-				scope.slots.inject("conversation.input.right", () =>
-					scope.slots.register(
-						{ name: "conversation.input.right", id: "thinking-strength", order: 20 },
-						ThinkingStrengthCheckbox
 					)
 				);
 			});

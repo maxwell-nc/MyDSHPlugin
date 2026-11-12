@@ -103,7 +103,7 @@ function install({ modelNameThrows, modelName, store, select, openList } = {}) {
   return { module, warnings, directories }
 }
 
-/** 跑 apply，拿到两个席位的注册项（模型座的 props 由 options.inject(sessionId) 提供）。 */
+/** 跑 apply，拿到席位注册项（模型座的 props 由 options.inject(sessionId) 提供）。 */
 function registeredSlots(module, directories) {
   const registrations = []
   const injections = []
@@ -126,7 +126,6 @@ function registeredSlots(module, directories) {
 
 const seatProps = (registration, sessionId = 's1') => registration.options.inject(sessionId)
 const seatOf = (regs) => regs.find((r) => r.options.name === 'conversation.input.model')
-const checkboxOf = (regs) => regs.find((r) => r.options.name === 'conversation.input.right')
 
 /* -------------------------------------------------------------------------- */
 console.log('用例 1：没有 dsh-model-name 时网页半边仍要活着（D1 回归）')
@@ -150,14 +149,11 @@ console.log('用例 1：没有 dsh-model-name 时网页半边仍要活着（D1 �
       select: () => Promise.resolve({ ok: true }),
     }),
   })
-  ok('两个席位都注册了（模型座 + 思考勾选框）',
-    seatOf(regs) !== undefined && checkboxOf(regs) !== undefined, regs.map((r) => r.options.name))
+  ok('只注册了模型座（勾选框已移除）',
+    seatOf(regs) !== undefined && !regs.some((r) => r.options.name === 'conversation.input.right'),
+    regs.map((r) => r.options.name))
   const tree = seatOf(regs).component(seatProps(seatOf(regs)))
   ok('模型座用兜底实现渲染出名字', JSON.stringify(tree).includes('Glm-5.3'), JSON.stringify(tree).slice(0, 200))
-  const checkTree = checkboxOf(regs).component({
-    useProjection: () => ({ lastUsed: { provider: 'merge', model: 'ctai_my/glm-5.3' } }),
-  })
-  ok('勾选框也还能渲染', checkTree !== null && JSON.stringify(checkTree).includes('思考'), JSON.stringify(checkTree).slice(0, 120))
 }
 
 /* -------------------------------------------------------------------------- */
@@ -210,22 +206,7 @@ console.log('用例 3：目录 store 的失败会显示成控件旁的「!」（
 }
 
 /* -------------------------------------------------------------------------- */
-console.log('用例 4：勾选框会去读宿主状态（有模型时）')
-{
-  fetched.length = 0
-  const { module } = install({ modelNameThrows: false })
-  const regs = registeredSlots(module, {})
-  const tree = checkboxOf(regs).component({
-    useProjection: () => ({ lastUsed: { provider: 'merge', model: 'ctai_my/deepseek-v4.1-flash' } }),
-  })
-  ok('渲染出勾选框', tree !== null && JSON.stringify(tree).includes('思考'), JSON.stringify(tree).slice(0, 160))
-  ok('按当前模型问了宿主 state',
-    fetched.some((url) => url === '/api/dsh-thinking-strength.state?provider=merge&model=ctai_my%2Fdeepseek-v4.1-flash'),
-    fetched)
-}
-
-/* -------------------------------------------------------------------------- */
-console.log('用例 5：模型名末尾的标记画成徽章（按钮 + 列表），模型 id 一点不动')
+console.log('用例 4：模型名末尾的标记画成徽章（按钮 + 列表），模型 id 一点不动')
 {
   /** 与共享 dsh-model-name 同规则的替身：规范化 + 徽章切分。 */
   const dictionary = { deepseek: 'DeepSeek', glm: 'GLM', qwen: 'Qwen', flash: 'Flash', tokenplan: 'TokenPlan', free: 'Free' }
