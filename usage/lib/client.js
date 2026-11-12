@@ -26,6 +26,11 @@ window.__ModuleLoader__.load({
 			".dshu-sum{display:flex;align-items:baseline;gap:8px;margin-top:16px}" +
 			".dshu-sumNum{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums}" +
 			".dshu-sumUnit{font-size:12px;color:var(--dsw-alias-label-tertiary,#8a93a8)}" +
+			// 图例表头（用量 / 速度 / 首字延迟 / 占比）与每行的读数单元。表头只用一次，
+			// 字号比正文小一档；缺工时（旧账本、解析图片）的单元格给「—」弱化，不留空。
+			".dshu-legendHead .dshu-legendCell{padding-bottom:4px;font-size:11px;color:var(--dsw-alias-label-tertiary,#8a93a8)}" +
+			".dshu-legendRate{font-variant-numeric:tabular-nums}" +
+			".dshu-legendNone{color:var(--dsw-alias-label-tertiary,#8a93a8)}" +
 			".dshu-legend{width:100%;margin-top:10px;border-collapse:collapse;table-layout:fixed;font-size:12px;cursor:default}" +
 			".dshu-legendRow{cursor:pointer}" +
 			".dshu-legendRow:hover .dshu-legendName{color:var(--dsw-alias-label-primary,#1b2130)}" +
@@ -290,10 +295,13 @@ window.__ModuleLoader__.load({
 		 * 两个开关都只改展示与聚合键，账本里记的仍是原始 model id。
 		 *
 		 * 日期跨度、合并逻辑都集中在这，所以开关与日期范围选择共用同一套数据加工。
+		 * 合并时**时序桶也一起相加**（ttftMs / ttftSteps / decodeMs / decodeTokens）——
+		 * 它们本来就是可加的累加量，合并/切区间之后直接 sum 就能算平均，不用重算。
 		 *
 		 * @param keys - 要展示的日期键数组（含首尾）。
 		 * @param recorded - 日期键 → 当天原始天数行（含 `models`）。
-		 * @returns {days, models, total} days=models 用归一化后的模型名当键。
+		 * @returns {days, models, total} days=models 用归一化后的模型名当键；每个模型条目
+		 *          带自己的时序合计（ttftMs / ttftSteps / decodeMs / decodeTokens）。
 		 */
 		function buildView(keys, recorded, hidePrefix, mergeBadge) {
 			const totals = new Map();
@@ -307,16 +315,34 @@ window.__ModuleLoader__.load({
 					const label = displayKey(raw, hidePrefix, mergeBadge);
 					const key = label;
 					const target = (row.models[key] =
-						row.models[key] || { tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 });
+						row.models[key] || {
+							tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0,
+							ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0
+						});
 					target.tokens += bucket.tokens || 0;
 					target.input += bucket.input || 0;
 					target.output += bucket.output || 0;
 					target.cacheRead += bucket.cacheRead || 0;
 					target.cacheWrite += bucket.cacheWrite || 0;
 					target.calls += bucket.calls || 0;
+					// 时序桶一起并（旧账本 / 外来上报没有就是 0）。
+					const ttftMs = bucket.ttftMs || 0;
+					const ttftSteps = bucket.ttftSteps || 0;
+					const decodeMs = bucket.decodeMs || 0;
+					const decodeTokens = bucket.decodeTokens || 0;
+					target.ttftMs += ttftMs;
+					target.ttftSteps += ttftSteps;
+					target.decodeMs += decodeMs;
+					target.decodeTokens += decodeTokens;
 					row.total += bucket.tokens || 0;
-					const agg = totals.get(key) || { label, tokens: 0 };
+					const agg = totals.get(key) || {
+						label, tokens: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0
+					};
 					agg.tokens += bucket.tokens || 0;
+					agg.ttftMs += ttftMs;
+					agg.ttftSteps += ttftSteps;
+					agg.decodeMs += decodeMs;
+					agg.decodeTokens += decodeTokens;
 					totals.set(key, agg);
 				}
 				return row;
@@ -326,9 +352,60 @@ window.__ModuleLoader__.load({
 				.sort(
 					(a, b) => b[1].tokens - a[1].tokens || (a[1].label < b[1].label ? -1 : a[1].label > b[1].label ? 1 : 0)
 				)
-				.map(([key, model]) => ({ id: key, label: model.label, tokens: model.tokens }));
+				.map(([key, model]) => ({
+					id: key,
+					label: model.label,
+					tokens: model.tokens,
+					ttftMs: model.ttftMs,
+					ttftSteps: model.ttftSteps,
+					decodeMs: model.decodeMs,
+					decodeTokens: model.decodeTokens
+				}));
 			const total = models.reduce((sum, model) => sum + model.tokens, 0);
 			return { days, models, total };
+		}
+
+		/**
+		 * 一个模型的「平均输出速度 / 平均首字延迟」读数（纯函数，自测在 test-timing.mjs）。
+		 *
+		 * 口径跟 composer 那格读数、跟上游 `session-stats` 投影一致：
+		 *   - 平均速度 = 解码 token 总量 ÷ 解码用时总量（**加权平均**，不是每次调用速度的
+		 *     算术平均 —— 后者会让一次很短的调用跟一次长输出等权，数字偏得厉害）；
+		 *   - 平均首字延迟 = 首字延迟总量 ÷ **有首字**的步数。
+		 * 分母为 0（这个模型没有工时）时对应读数为 null：表格里显示「—」，而不是
+		 * 「0 t/s」—— 那会被误读成模型真的这么慢。解析图片这类外来上报没有工时，
+		 * 也不进这两个分母（见宿主 recordExternal）。
+		 *
+		 * @param timing - 该模型的时序合计 `{ttftMs, ttftSteps, decodeMs, decodeTokens}`（可缺失）。
+		 * @returns `{speed, ttft}`，都是格式化好的文本，没有样本时为 null。
+		 */
+		function timingReadings(timing) {
+			const ttftMs = Number(timing?.ttftMs) || 0;
+			const ttftSteps = Number(timing?.ttftSteps) || 0;
+			const decodeMs = Number(timing?.decodeMs) || 0;
+			const decodeTokens = Number(timing?.decodeTokens) || 0;
+			const speed = decodeMs > 0 ? formatTokensPerSecond(decodeTokens / (decodeMs / 1e3)) : null;
+			// 平均首字延迟按「毫秒」进 formatDuration（它收 ms，吐出 `0.6秒` / `2分42秒`）。
+			const ttft = ttftSteps > 0 ? formatDuration(ttftMs / ttftSteps) : null;
+			return { speed, ttft };
+		}
+
+		/**
+		 * 把多行（图例里的「其他」分组）的时序桶相加。四个量都是可加的累加量，
+		 * 所以合并不需要重算平均，先 sum 再交给 timingReadings() 即可。
+		 *
+		 * @param rows - 带 `ttftMs / ttftSteps / decodeMs / decodeTokens` 的行（缺字段按 0）。
+		 * @returns 时序合计（没有任何行时四项都为 0）。
+		 */
+		function sumTiming(rows) {
+			const total = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0 };
+			for (const row of rows || []) {
+				total.ttftMs += Number(row?.ttftMs) || 0;
+				total.ttftSteps += Number(row?.ttftSteps) || 0;
+				total.decodeMs += Number(row?.decodeMs) || 0;
+				total.decodeTokens += Number(row?.decodeTokens) || 0;
+			}
+			return total;
 		}
 
 		/** 生成 start 到 end（含）之间的全部日期键。 */
@@ -971,7 +1048,16 @@ window.__ModuleLoader__.load({
 			const [selected, setSelected] = react.useState(() => new Set());
 			const legendRowsFor = () =>
 				models
-					.map((model) => ({ id: model.id, label: model.label, tokens: model.tokens ?? 0 }))
+					.map((model) => ({
+						id: model.id,
+						label: model.label,
+						tokens: model.tokens ?? 0,
+						// 每行带着自己的时序桶：速度 / 首字延迟都按这个模型自己算（不是区间总平均）。
+						ttftMs: model.ttftMs ?? 0,
+						ttftSteps: model.ttftSteps ?? 0,
+						decodeMs: model.decodeMs ?? 0,
+						decodeTokens: model.decodeTokens ?? 0
+					}))
 					.filter((row) => row.tokens > 0)
 					.sort((left, right) => right.tokens - left.tokens)
 					.map((row) => ({ ...row, color: colors.get(row.id) ?? PALETTE[0] }));
@@ -1020,6 +1106,9 @@ window.__ModuleLoader__.load({
 					id: "__other",
 					label: "其他",
 					tokens: rest.reduce((sum, row) => sum + row.tokens, 0),
+					// 这一行没有单一模型，但读数照样能给：把折叠进去的模型各自的时序相加，
+					// 得到这一组的加权速度 / 平均首字延迟。
+					...sumTiming(rest),
 					folded: false,
 					isOther: true
 				});
@@ -1129,12 +1218,29 @@ window.__ModuleLoader__.load({
 										className: "dshu-legend",
 										onMouseLeave: hideLegend
 									},
+									// 表头：把「用量 / 速度 / 首字延迟 / 占比」四列说清楚，否则光看数字不知道
+									// 142 是 t/s 还是 token。列宽与下面每个 <td> 的 width 一致。
+									h(
+										"thead",
+										null,
+										h(
+											"tr",
+											{ className: "dshu-legendHead" },
+											h("td", { className: "dshu-legendCell", style: { width: LEAD_WIDTH } }),
+											h("td", { className: "dshu-legendCell" }, "模型"),
+											h("td", { className: "dshu-legendCell dshu-legendNum", style: { width: 72 } }, "用量"),
+											h("td", { className: "dshu-legendCell dshu-legendNum", style: { width: 52 } }, "速度 t/s"),
+											h("td", { className: "dshu-legendCell dshu-legendNum", style: { width: 68 } }, "首字延迟"),
+											h("td", { className: "dshu-legendCell dshu-legendNum", style: { width: 44 } }, "占比")
+										)
+									),
 									h(
 										"tbody",
 										null,
 										legendItems.map((row) => {
 											const isOther = row.isOther === true;
 											const folded = row.folded === true;
+											const readings = timingReadings(row);
 											const dim = !isOther && hasFilter && !selected.has(row.id);
 											const sel = !isOther && hasFilter && selected.has(row.id);
 											const cls =
@@ -1185,11 +1291,36 @@ window.__ModuleLoader__.load({
 													)
 												),
 												h("td", { className: "dshu-legendCell dshu-legendNum", style: { width: 72 } }, formatAmount(row.tokens)),
+												// 这个模型自己的平均输出速度：解码 token ÷ 解码用时（加权平均）。
+												// 没有工时（旧账本 / 解析图片这类外来上报）显示「—」，不显示 0。
+												h(
+													"td",
+													{
+														className: "dshu-legendCell dshu-legendNum dshu-legendRate",
+														style: { width: 52 },
+														title: "该模型：解码 token ÷ 解码用时（加权平均，只统计有工时的会话结算）"
+													},
+													readings.speed === null
+														? h("span", { className: "dshu-legendNone" }, "—")
+														: readings.speed
+												),
+												// 这个模型自己的平均首字延迟（一步开始 → 首个可见 token）。
+												h(
+													"td",
+													{
+														className: "dshu-legendCell dshu-legendNum dshu-legendRate",
+														style: { width: 68 },
+														title: "该模型：一步开始到首个可见 token 的平均耗时（TTFT）"
+													},
+													readings.ttft === null
+														? h("span", { className: "dshu-legendNone" }, "—")
+														: readings.ttft
+												),
 												// 最右一列：模型行是占比；「其他」行放**文字**形式的展开/收起
 												// （不要箭头，需求就是文字）；折叠行什么都不放（纯文本明细）。
 												h(
 													"td",
-													{ className: "dshu-legendCell dshu-legendNum", style: { width: 48 } },
+													{ className: "dshu-legendCell dshu-legendNum", style: { width: 44 } },
 													isOther
 														? h("span", { className: "dshu-foldBtn" }, othersOpen ? "收起" : "展开")
 														: folded
@@ -1801,6 +1932,8 @@ window.__ModuleLoader__.load({
 		};
 		/** 同一套纯函数自测口子：模型名规范化 / 徽章合并 / 「天 × 模型」聚合（test-model-merge.mjs）。 */
 		exports.__usage = { buildView, displayKey, badgeBase };
+		/** 每模型平均读数与「其他」行求和的口子（test-timing.mjs 验口径）。 */
+		exports.__timing = { timingReadings, sumTiming };
 		return module.exports;
 	}
 });

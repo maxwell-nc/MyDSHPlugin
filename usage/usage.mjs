@@ -8,6 +8,10 @@
  *    （`assistant/message` / `assistant/attempt` 上的 `usage` 字段，或该次结算
  *    stream 里最后一个 `usage` chunk），按「天 × 模型」累计**总 token**，
  *    落到账本文件（默认 `<应用数据根>/data/usage.json`，见 dataFilePath()）。
+ *    同一次结算还顺带累计**时序桶**（首字延迟 / 解码工时 / 输出 token，见
+ *    timingOf()）—— 界面上的「平均输出速度」「平均首字延迟」就靠它们，口径与
+ *    上游 `@deepseek-ai/dsh-session-stats` 的投影逐行一致（composer 那格读数
+ *    用的也是那份投影，两处数字能对上）。
  *
  * 2. **展示**：注册一条鉴权过的 HTTP 读取接口 `/api/usage.data`，浏览器那半边
  *    （lib/client.js）在左下角设置按钮上方渲染入口 + 堆叠柱状图。
@@ -33,6 +37,13 @@
  * 可能带同一份 usage 反复结算（重试、流式收敛），直接累加会成倍虚高。上游
  * tokenUsageProjection 的做法是记住 last 样本，新增量 = 新值 - 旧值；这里照抄，
  * 并用 `llm/retry-started` 清空 last（重试后是**新**的一次调用，要重新计）。
+ * **时序桶（ttft / decode）跟着同一份 last 样本一起覆盖**，绝不单独累加 ——
+ * 否则同一步结算两次就把「平均首字延迟」算了两遍。详见 fold 里的 previous.timing。
+ *
+ * **平均值只从「有时序的样本」算**：`ttftSteps` 是首字延迟的分母，`decodeMs` /
+ * `decodeTokens` 是速度的分母/分子 —— 两个分母都只由**会话结算**累加，
+ * `recordExternal()`（解析图片这类没有工时的辅助请求）只进 token 桶、不碰时序桶，
+ * 所以外来上报不会把平均速度稀释成 0。
  *
  * **模型名来自 `request/header` 的 `header.config.model`**，事件里没有别的来源。
  * 所以每个会话都要维护「当前模型」——新会话第一次被看到时，要把它已有的日志
@@ -171,7 +182,19 @@ function bucketsOf(usage) {
   return { tokens: input + cacheRead + cacheWrite + output, input, output, cacheRead, cacheWrite }
 }
 
-const zeroBuckets = () => ({ tokens: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+const zeroBuckets = () => ({
+  tokens: 0,
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  // 时序桶（见文件头）：首字延迟累计/步数、解码窗口累计/该窗口的输出 token。
+  // 旧账本里的桶没有这四个字段，读回时按 0 处理（num()），落账时按需补上。
+  ttftMs: 0,
+  ttftSteps: 0,
+  decodeMs: 0,
+  decodeTokens: 0
+})
 
 function bucketsEqual(a, b) {
   return (
@@ -181,6 +204,36 @@ function bucketsEqual(a, b) {
     a.cacheRead === b.cacheRead &&
     a.cacheWrite === b.cacheWrite
   )
+}
+
+/** 一个能当「有效时刻」用的数：有限数字才算，其余（缺失/坏值）返回 undefined。 */
+const timeOf = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
+
+/** 覆盖语义用的取反桶（把上一样本从它自己的那天/那个模型上减掉）。 */
+const negateBuckets = (buckets) => ({
+  tokens: -buckets.tokens,
+  input: -buckets.input,
+  output: -buckets.output,
+  cacheRead: -buckets.cacheRead,
+  cacheWrite: -buckets.cacheWrite
+})
+
+/** 同上，时序桶的取反；样本没有时序（null）时原样返回 null。 */
+const negateTiming = (timing) =>
+  timing === null || timing === undefined
+    ? null
+    : {
+        ttftMs: -timing.ttftMs,
+        ttftSteps: -timing.ttftSteps,
+        decodeMs: -timing.decodeMs,
+        decodeTokens: -timing.decodeTokens
+      }
+
+/** 两份时序样本是不是同一笔（都是 null 也算相等）。 */
+function timingEqual(a, b) {
+  if (a === b) return true
+  if (a === null || a === undefined || b === null || b === undefined) return false
+  return a.ttftMs === b.ttftMs && a.ttftSteps === b.ttftSteps && a.decodeMs === b.decodeMs && a.decodeTokens === b.decodeTokens
 }
 
 /**
@@ -204,6 +257,106 @@ function usageOf(event) {
     }
   }
   return undefined
+}
+
+/**
+ * 一个 stream chunk 算不算「首 token」—— 与上游 dsh-llm 的 `isTokenDelta` 同口径：
+ * 文本 / 推理 delta 只要**非空**就算（空白也算，那是 isVisibleChunk 的另一套口径），
+ * 工具调用 delta 只要带名字或参数也算；usage、finish、block 边界都不算。
+ */
+function isTokenChunk(chunk) {
+  switch (chunk?.type) {
+    case 'text-delta':
+    case 'reasoning-delta':
+      return chunk.text !== ''
+    case 'tool-call-delta':
+      return chunk.argumentsDelta !== '' || chunk.name !== undefined
+    default:
+      return false
+  }
+}
+
+/**
+ * 首个 token 的发生时刻 —— 等价于上游 `assistantStreamFirstTokenTime(stream)`，
+ * 只是不 import dsh-llm（事件里的 stream 一定是 JSON，逐条扫一遍很便宜）。
+ *
+ * stream 是**压缩过的**：delta 打包成 `text-chunks` / `reasoning-chunks` /
+ * `tool-call-chunks` 运行段（首成员时刻 `time0`、相邻间隔 `dt[]`），其余是原始
+ * `chunk` 记录。运行段里第一个非空成员的时刻 = `time0 + Σdt[0..i-1]`，所以逐字
+ * 还原时间，不用展开整条流。读不出来返回 undefined（纯工具调用、空流等）。
+ */
+function firstTokenTime(stream) {
+  if (!Array.isArray(stream)) return undefined
+  /** `time0` 加上前 `count` 个间隔 —— 运行段第 count 个成员的时刻。 */
+  const at = (time0, count, dt) => {
+    let time = time0
+    for (let index = 0; index < count; index += 1) time += num(dt?.[index])
+    return time
+  }
+  for (const record of stream) {
+    if (record?.type === 'chunk') {
+      const time = timeOf(record.time)
+      if (time !== undefined && isTokenChunk(record.chunk)) return time
+      continue
+    }
+    const time0 = timeOf(record?.time0)
+    if (time0 === undefined) continue
+    if (record.type === 'tool-call-chunks') {
+      // 带名字的工具调用从运行段起点就算首 token；否则找第一个非空参数片段。
+      if (record.name !== undefined) return time0
+      const args = Array.isArray(record.args) ? record.args : []
+      for (let index = 0; index < args.length; index += 1) {
+        if (args[index] !== '') return at(time0, index, record.dt)
+      }
+      continue
+    }
+    if (record.type === 'text-chunks' || record.type === 'reasoning-chunks') {
+      const texts = Array.isArray(record.texts) ? record.texts : []
+      for (let index = 0; index < texts.length; index += 1) {
+        if (texts[index] !== '') return at(time0, index, record.dt)
+      }
+    }
+  }
+  return undefined
+}
+
+/**
+ * 一次结算的时序样本（首字延迟 + 解码窗口）—— 与上游 `session-stats` 投影同式
+ * （`packages/session/session-stats/src/projection.ts` 的 apply()）。
+ *
+ *   - 起点 = `step/start` 的 `event.time`（存在 slot.open 上）
+ *   - 首字 = `open.firstTokenTime`（attempt 阶段记过就不再改，重试也保留），
+ *     没记过就现从本次 stream 里取
+ *   - 终点 = 本次结算的 `event.time`
+ *   - 解码窗口只在**上报了 outputTokens** 时才算（否则 speed 的分子是空的）
+ *
+ * 任何一环缺失（没有 step/start、流里没有可见 token、没有时刻）一律返回 null：
+ * 宁可不计，也不拿 0 去稀释平均值。返回的四个量会进「天 × 模型」桶的时序桶。
+ *
+ * @param event - 本次结算事件（assistant/message 或 assistant/attempt）。
+ * @param open - 该步的起点事实（slot.open），可以为 null。
+ * @param usage - 本次结算取到的 usage（已由 usageOf 校验）。
+ * @returns `{ttftMs, ttftSteps, decodeMs, decodeTokens}` 或 null。
+ */
+function timingOf(event, open, usage) {
+  if (open === null || open === undefined) return null
+  const data = event?.data
+  if (num(data?.turn) !== open.turn || num(data?.step) !== open.step) return null
+  const first = open.firstTokenTime ?? firstTokenTime(data?.stream)
+  if (first === undefined) return null
+  const end = timeOf(event?.time)
+  if (end === undefined) return null
+  if (open.startTime === undefined) return null
+  const output =
+    typeof usage?.outputTokens === 'number' && Number.isFinite(usage.outputTokens) && usage.outputTokens >= 0
+      ? usage.outputTokens
+      : null
+  return {
+    ttftMs: Math.max(0, first - open.startTime),
+    ttftSteps: 1,
+    decodeMs: output === null ? 0 : Math.max(0, end - first),
+    decodeTokens: output === null ? 0 : output
+  }
 }
 
 /** 从 `request/header` 里读模型名。读不出来返回空串。 */
@@ -333,13 +486,20 @@ function createCollector(path) {
   function slotOf(session) {
     let slot = slots.get(session)
     if (slot === undefined) {
-      slot = { model: '', title: '', last: undefined }
+      // `open` = 当前步的起点事实（step/start 的 turn/step/时刻 + 首字时刻），
+      // 算首字延迟和解码窗口要用；跨步/重试的语义见 fold 里的 step/start 分支。
+      slot = { model: '', title: '', last: undefined, open: null }
       slots.set(session, slot)
     }
     return slot
   }
 
-  function addToDay(day, model, buckets) {
+  /**
+   * 往「天 × 模型」桶累加一笔（buckets 可以是负数，覆盖语义的「先减」也走这里）。
+   *
+   * @param timing - 时序桶增量（可为 null：外来上报 / 读不出工时）；只加 token 桶时传 undefined。
+   */
+  function addToDay(day, model, buckets, timing) {
     const row = (state.days[day] ??= { models: {} })
     const bucket = (row.models[model] ??= { ...zeroBuckets(), calls: 0 })
     bucket.tokens += buckets.tokens
@@ -347,6 +507,13 @@ function createCollector(path) {
     bucket.output += buckets.output
     bucket.cacheRead += buckets.cacheRead
     bucket.cacheWrite += buckets.cacheWrite
+    if (timing !== null && timing !== undefined) {
+      // 旧账本的桶没有这四个字段：按 0 起算（不能直接 `+=`，否则 undefined 变 NaN）。
+      bucket.ttftMs = num(bucket.ttftMs) + timing.ttftMs
+      bucket.ttftSteps = num(bucket.ttftSteps) + timing.ttftSteps
+      bucket.decodeMs = num(bucket.decodeMs) + timing.decodeMs
+      bucket.decodeTokens = num(bucket.decodeTokens) + timing.decodeTokens
+    }
   }
 
   /**
@@ -372,6 +539,45 @@ function createCollector(path) {
     if (event.type === 'request/header') {
       const model = modelOf(event)
       if (model.length > 0) slot.model = model
+      return false
+    }
+
+    // 一步的起点：`step/start` 的 `event.time`。首字延迟（TTFT）与解码窗口都以它
+    // 为基准 —— 口径照上游 session-stats 投影。必须放在 countUsage 之前：warmUp
+    // 回放时也要把「已经开始的这一步」的起点补进来，否则插件刚起来时那一轮的
+    // 工时就算不出来（模型名回放是同一个道理）。
+    if (event.type === 'step/start') {
+      slot.open = {
+        turn: num(event.data?.turn),
+        step: num(event.data?.step),
+        startTime: timeOf(event?.time),
+        // 首字时刻先空着，由 assistant/attempt / assistant/message 记（见下）。
+        firstTokenTime: null
+      }
+      return false
+    }
+
+    // 首字时刻在 attempt 阶段就定下来：同一 (turn, step) 只记第一次（重试保留，
+    // 与 session-stats 一致 —— 用户确实在那时看到了第一个 token）。
+    // 注意**不能 return**：attempt 自己也可能带 usage（见 usageOf），还要往下走。
+    if (event.type === 'assistant/attempt') {
+      const open = slot.open
+      if (
+        open !== null &&
+        open !== undefined &&
+        open.firstTokenTime === null &&
+        open.turn === num(event.data?.turn) &&
+        open.step === num(event.data?.step)
+      ) {
+        const first = firstTokenTime(event.data?.stream)
+        if (first !== undefined) open.firstTokenTime = first
+      }
+    }
+
+    // 一步结束：起点事实用完就清掉（下一步的 step/start 会覆盖，这里只是别留脏数据）。
+    // 同样放在 countUsage 之前，让 warmUp 回放结束时 slot 与日志状态一致。
+    if (event.type === 'step/end') {
+      slot.open = null
       return false
     }
 
@@ -421,23 +627,27 @@ function createCollector(path) {
     const day = dayKey()
 
     const previous = slot.last !== undefined && slot.last.turn === turn && slot.last.step === step ? slot.last : undefined
-    if (previous !== undefined && previous.model === model && previous.day === day && bucketsEqual(previous.buckets, buckets)) {
+    // 时序样本：算不出来（重复结算时 step/start 已过、或本该没有）就沿用上一样本，
+    // 免得「先减后加」把已经记下的工时冲成 0。session-stats 只在结算时记一次，
+    // 而这里允许同一步反复结算（流式收敛），所以必须让工时跟着 last 一起覆盖。
+    const timing = timingOf(event, slot.open, usage) ?? (previous !== undefined ? previous.timing : null)
+    if (
+      previous !== undefined &&
+      previous.model === model &&
+      previous.day === day &&
+      bucketsEqual(previous.buckets, buckets) &&
+      timingEqual(previous.timing, timing)
+    ) {
       return false
     }
 
     if (previous !== undefined) {
       // 覆盖语义：先把上一次记的减掉，再把这次完整记上。跨天/换模型的边界情况
-      // 也靠这一手兜住（减法落在旧样本自己的那一天/那个模型上）。
-      addToDay(previous.day, previous.model, {
-        tokens: -previous.buckets.tokens,
-        input: -previous.buckets.input,
-        output: -previous.buckets.output,
-        cacheRead: -previous.buckets.cacheRead,
-        cacheWrite: -previous.buckets.cacheWrite
-      })
+      // 也靠这一手兜住（减法落在旧样本自己的那一天/那个模型上）—— 时序桶同理。
+      addToDay(previous.day, previous.model, negateBuckets(previous.buckets), negateTiming(previous.timing))
     }
 
-    addToDay(day, model, buckets)
+    addToDay(day, model, buckets, timing)
     if (previous === undefined || previous.model !== model) {
       state.days[day].models[model].calls += 1
       recordSource({
@@ -452,7 +662,7 @@ function createCollector(path) {
       prune(state, day)
     }
 
-    slot.last = { turn, step, model, day, buckets }
+    slot.last = { turn, step, model, day, buckets, timing }
     return true
   }
 
@@ -602,6 +812,9 @@ function createCollector(path) {
    * 通过宿主事件 `dsh-usage/report` 把这一笔上报上来，这里把它归到「当天 × 视觉
    * 模型」名下记账。上报方不在也没关系（事件没人发就没这一笔），报错一律吞掉。
    *
+   * **外来上报不碰时序桶**：这类请求没有 step/start、没有首字时刻，硬塞进平均值
+   * 会把「平均速度 / 平均首字延迟」稀释掉，所以只累加 token 桶（timing 传 undefined）。
+   *
    * @param report - `{ provider?, model?, usage }`；usage 需含 input/output 两桶。
    * @returns 账本是否变化。
    */
@@ -635,6 +848,11 @@ function createCollector(path) {
    * 给浏览器用的视图：最近 KEEP_DAYS 天 + 这段时间内的模型排行。
    * 颜色不上这里定 —— 由客户端按 models 顺序分配，柱子和图例自然一致。
    *
+   * 每个「天 × 模型」桶除了 token 分桶，还带**时序桶**（ttftMs / ttftSteps /
+   * decodeMs / decodeTokens）：客户端按所选区间与展示用的模型键合并后，算
+   * 「平均输出速度 = decodeTokens ÷ (decodeMs/1000)」和「平均首字延迟 =
+   * ttftMs ÷ ttftSteps」。没有工时的桶（旧账本、外来上报）这四个量是 0。
+   *
    * 每次调用都先 `reload()` 一次：界面上的「刷新」和 5 秒轮询都打到这儿，
    * 所以拿到的永远是磁盘上最新的账本（见 reload 的说明）。
    */
@@ -658,7 +876,13 @@ function createCollector(path) {
           output: num(bucket.output),
           cacheRead: num(bucket.cacheRead),
           cacheWrite: num(bucket.cacheWrite),
-          calls: num(bucket.calls)
+          calls: num(bucket.calls),
+          // 时序桶（旧账本 / 外来上报没有就是 0）：客户端据此算平均速度与平均首字延迟。
+          // 平均速度 = decodeTokens ÷ (decodeMs / 1000)；平均首字延迟 = ttftMs ÷ ttftSteps。
+          ttftMs: Math.max(0, num(bucket.ttftMs)),
+          ttftSteps: Math.max(0, num(bucket.ttftSteps)),
+          decodeMs: Math.max(0, num(bucket.decodeMs)),
+          decodeTokens: Math.max(0, num(bucket.decodeTokens))
         }
         row.total += tokens
         totals.set(model, (totals.get(model) ?? 0) + tokens)

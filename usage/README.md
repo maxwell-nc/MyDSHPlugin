@@ -14,6 +14,11 @@
 （只画选中的模型、其余变灰，支持多选，点折叠行同样能把它单独画出来 —— 单独筛一个小用量
 模型时，它的曲线会按自己的量程铺满画布；「重置筛选」恢复全部）。
 
+图例每行除了用量 / 占比，还有**这个模型自己的**平均输出速度（`速度 t/s`）与平均首字
+延迟（`首字延迟`）：宿主在采集时按「天 × 模型」顺手累计**时序桶**，客户端只做加法
+（见下「每个模型的平均速度与首字延迟」）。只统计**有工时记录的会话结算**——解析图片
+这类外来上报没有工时，不进分母；没有工时的模型那两格显示「—」，而不是 `0 t/s`。
+
 除了 `session/event`（agent loop 的结算事件），还监听宿主事件 **`dsh-usage/report`**，
 收下配套插件上报的**辅助 LLM 请求**用量——主要是 dsh-image-reader 的视觉桥接
 （直接 `ctx.llm.stream()`、不经 agent loop，会话里没有结算事件）。这是两条独立的
@@ -33,6 +38,7 @@ usage/
 ├── lib/client.js       # 浏览器半边：入口 + 面板 + 柱状图 + composer 三格读数
 ├── test-record-external.mjs    # 外来上报的自测
 ├── test-composer-readings.mjs  # composer 读数的自测
+├── test-timing.mjs             # 时序桶（平均速度 / 平均首字延迟）的自测
 └── test-model-merge.mjs        # 「合并徽章」与「规范模型名」聚合的自测（装共享库真身）
 ```
 
@@ -117,6 +123,38 @@ profile `node_modules` 的**安装目录**：账本放包里面，一是装/升�
 - 核心那两个面板组件的皮肤是**抄的**（值一字不改），所以核心哪天改了面板样式，这里不会
   自动跟着变；换皮肤时要回来对一遍。
 
+## 每个模型的平均速度与首字延迟（TTFT）
+
+图例每行的 `速度 t/s` / `首字延迟` 两列不是客户端现算的，而是宿主**采集时顺手累计**的：
+每次会话结算往「天 × 模型」桶里加四个时序量，客户端只做加法 —— 切日期区间、合并模型名
+时一起相加，**每个模型各算各的平均**（没有一个「全区间总平均」这种东西）。口径与上游
+`@deepseek-ai/dsh-session-stats` 投影、以及 composer 那格读数**逐行一致**，同一模型两处
+数字能对上。
+
+| 量 | 公式 | 分母（样本数） |
+|---|---|---|
+| 平均输出速度 | `decodeTokens ÷ (decodeMs / 1000)` | `decodeMs > 0` 的步 |
+| 平均首字延迟 | `ttftMs ÷ ttftSteps` | 记到首字的步 |
+
+- **首字延迟** = `step/start` 的 `event.time` → 流里第一个非空 delta 的时刻
+  （文本 / 推理的**非空** delta，或带名字 / 参数的工具调用 delta；usage、finish、
+  block 边界都不算）。与 `dsh-llm` 的 `assistantStreamFirstTokenTime()` 同口径；
+  插件不 import 它，而是逐条扫压缩 stream 自己还原（运行段的 `time0 + Σdt`，
+  见 `firstTokenTime()`）。
+- **解码窗口** = 首个非空 delta → `assistant/message` 的 `event.time`，且**只在这次
+  结算上报了 `outputTokens` 时**才算——否则速度的分子是空的。
+- 平均速度是**加权平均**（该模型总 token ÷ 总用时），不是「每次调用速度的算术平均」：
+  后者会让一次 10 token 的短调用和一次 10K token 的长输出等权，数字会明显偏低。
+- 任一环缺失（没有 `step/start`、流里没有可见 token、没上报输出 token）就**不计**，
+  绝不拿 0 去稀释平均；所以解析图片这类外来上报虽然进 token 桶，但**不进分母**。
+  没有工时的模型（旧账本、外来上报）那两格显示 `—`，不显示 `0 t/s`。
+- 「其他」行（折叠的小用量模型）把组内各模型的时序相加后再算平均（仍是加权口径，
+  不是各行速度的平均）；展开后每一行显示它自己的读数。
+- 图例筛选（点击模型名）只影响折线图，不改表格里各行自己的读数。
+
+`ttftMs` / `decodeMs` 都是毫秒整数，`ttftSteps` 是记到首字的步数 —— 平均首字延迟
+直接 `ttftMs / ttftSteps`，不用另存样本数。
+
 ## 装法
 
 在 profile 目录下用**绝对路径**安装：
@@ -158,7 +196,9 @@ pnpm add D:\Project\dsplugin\usage
     "2026-09-19": {
       "models": {
         "deepseek-chat": { "tokens": 2220, "input": 1900, "output": 320,
-                           "cacheRead": 0, "cacheWrite": 0, "calls": 3 }
+                           "cacheRead": 0, "cacheWrite": 0, "calls": 3,
+                           "ttftMs": 2100, "ttftSteps": 3,
+                           "decodeMs": 5400, "decodeTokens": 320 }
       }
     }
   },
@@ -188,6 +228,11 @@ pnpm add D:\Project\dsplugin\usage
 `tokens = input + cacheRead + cacheWrite + output`，四个桶互不重叠
 （reasoning 已含在 output 里）—— 和上游 `@deepseek-ai/dsh-token-meter` 的
 `usageTokens()` 一致。
+
+每个桶后面那四个是**时序桶**（1.4.0 起）：`ttftMs` / `ttftSteps` 是首字延迟的累计与
+样本数，`decodeMs` / `decodeTokens` 是解码窗口的累计用时与窗口内输出 token。它们只由
+**会话结算**累加，旧账本（1.3.x 及更早）没有这四个字段时按 0 处理，不用迁移；下次写账
+时自动补上。见下节。
 
 界面上的用量单位**自动进位**：不到 1 亿走「万」（除以 10000），到 1 亿走「亿」
 （除以 1e8）。判定按四舍五入后的值来（阈值 `9999.5 万`），免得写出「10000.0 万」。
@@ -368,6 +413,13 @@ composer 那三格读数的格式化规则、读数文本与注册接线也有�
 
 ```bash
 node usage/test-composer-readings.mjs  # 万/亿/K/M/速度/耗时/命中率 + 三格读数 + 接线
+```
+
+时序桶（平均速度 / 平均首字延迟）有独立的假 ctx 自测 —— 喂合成会话事件，走完
+「首字记录 → 结算 → 重结算覆盖 → 打包运行段 → 外来上报隔离 → 落盘」全链路：
+
+```bash
+node usage/test-timing.mjs   # 时序桶 + 覆盖语义 + buildView 合并 + 读数口径
 ```
 
 **真实事件形状**用 headless profile 跑一轮真对话验证（最省事，一条命令跑完即退）：

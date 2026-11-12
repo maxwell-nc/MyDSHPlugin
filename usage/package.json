@@ -1,11 +1,12 @@
 {
   "name": "dsh-usage",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
-  "description": "dsh token 用量统计插件（host 半边 + Web 客户端半边）；含「规范模型名」与「合并徽章」两个展示开关（后者默认开，把 -TokenPlan / -Free / 构建号这类末尾标记并成一个模型）",
+  "description": "dsh token 用量统计插件（host 半边 + Web 客户端半边）；含「规范模型名」与「合并徽章」两个展示开关（后者默认开，把 -TokenPlan / -Free / 构建号这类末尾标记并成一个模型），图例每行显示该模型自己的平均输出速度与平均首字延迟（TTFT）",
   "scripts": {
-    "test:model-merge": "node test-model-merge.mjs"
+    "test:model-merge": "node test-model-merge.mjs",
+    "test:timing": "node test-timing.mjs"
   },
   "exports": {
     ".": "./usage.mjs",
