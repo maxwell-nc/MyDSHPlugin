@@ -359,7 +359,9 @@ function previousRouteOf(ctx, session, event) {
   for (let i = start; i >= 0; i--) {
     const candidate = events[i]
     if (candidate?.type !== 'model/selection') continue
-    return routeKey(candidate.data.provider, candidate.data.model)
+    const data = candidate?.data
+    if (!data || typeof data.provider !== 'string' || typeof data.model !== 'string') continue
+    return routeKey(data.provider, data.model)
   }
   try {
     const header = typeof session.requestHeader === 'function' ? session.requestHeader() : undefined
@@ -405,7 +407,7 @@ function replayEffort(controller, projections, session, selection, effort) {
       }
       console.error(`${TAG} 恢复思考强度失败：${reasonOf(error)}`)
     }
-  })()
+  })().catch((error) => console.error(`${TAG} 回放异常：${reasonOf(error)}`))
 }
 
 /**

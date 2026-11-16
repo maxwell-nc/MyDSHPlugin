@@ -480,9 +480,11 @@ export function apply(ctx) {
       }
     }
 
-    const editor = configEditorOf(ctx)
-    const llm = editor === undefined ? undefined : llmEntryOf(editor)
-    console.error(`${TAG} patch = ${editor?.documentPath ?? '（configEditor 不可用）'}${llm === undefined ? '，llm-pi-ai 条目未找到' : ''}`)
+    try {
+      const editor = configEditorOf(ctx)
+      const llm = editor === undefined ? undefined : llmEntryOf(editor)
+      console.error(`${TAG} patch = ${editor?.documentPath ?? '（configEditor 不可用）'}${llm === undefined ? '，llm-pi-ai 条目未找到' : ''}`)
+    } catch { /* 只想打个日志，读不到别让 getter 逃逸 */ }
   })
 }
 

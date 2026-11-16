@@ -948,8 +948,15 @@ let EXIT_HOOKED = false
  * @param ctx - 宿主侧插件 context。
  */
 export function apply(ctx) {
-  const path = dataFilePath()
-  const collector = createCollector(path)
+  let path
+  let collector
+  try {
+    path = dataFilePath()
+    collector = createCollector(path)
+  } catch (error) {
+    console.error(`${TAG} 初始化失败：${String(error?.message ?? error)}`)
+    return
+  }
 
   // 每天清理一次账本（删掉 KEEP_DAYS 之前的天）。用 setInterval 相对今天跑，
   // 插件常驻期间每天都触发；万一某天事件没来，还有 fold 里的 prune 兜底。
@@ -973,10 +980,14 @@ export function apply(ctx) {
         path: API_PATH,
         methods: ['GET'],
         requestBody: 'buffered',
-        fetch: () =>
-          Promise.resolve(
-            Response.json(collector.payload(), { headers: { 'cache-control': 'no-store' } })
-          )
+        fetch: async () => {
+          try {
+            return Response.json(collector.payload(), { headers: { 'cache-control': 'no-store' } })
+          } catch (error) {
+            console.error(`${TAG} 读取接口异常：${String(error?.message ?? error)}`)
+            return new Response('internal error', { status: 500 })
+          }
+        }
       })
       if (!QUIET) {
         console.error(`${TAG} 读取接口 = ${API_PATH}；界面入口在左下角设置上方`)

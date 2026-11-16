@@ -260,7 +260,14 @@ export function apply(ctx, config) {
       return discoveryCache.rows
     }
     const rows = []
-    const providers = await withTimeout(ctx.llm.listProviders(), DISCOVERY_TIMEOUT_MS, 'listProviders')
+    let providers
+    try {
+      providers = await withTimeout(ctx.llm.listProviders(), DISCOVERY_TIMEOUT_MS, 'listProviders')
+    } catch (error) {
+      console.error(`${TAG} 枚举模型 provider 失败: ${String(error?.message ?? error)}`)
+      discoveryCache = { at: Date.now(), rows }
+      return rows
+    }
     for (const provider of providers ?? []) {
       if (signal?.aborted) break
       try {

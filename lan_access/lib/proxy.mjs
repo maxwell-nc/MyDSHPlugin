@@ -180,6 +180,7 @@ export function createProxy(options) {
         (response) => {
           const raw = response.headers['set-cookie']
           const first = Array.isArray(raw) ? raw[0] : raw
+          response.on('error', () => {}) // 排空后被丢掉的流，error 也要接住
           response.resume() // 响应体没用，排空即可
           if (response.statusCode !== 303 || typeof first !== 'string' || first.length === 0) {
             reject(new Error(`兑换上游 cookie 失败：HTTP ${String(response.statusCode ?? 0)}`))
@@ -407,6 +408,8 @@ export function createProxy(options) {
           const status = response.statusCode ?? 502
           // cookie 过期/进程换了 token 时上游会 401/403：重换一次再试
           if ((status === 401 || status === 403) && !retried && isRetryable(req)) {
+            // 排空后被丢掉的流：上游中途断连会以 'error' 事件抛出，必须接住
+            response.on('error', () => {})
             response.resume()
             ensureCookie(true).then(
               (fresh) => forward(fresh, true),
@@ -416,14 +419,18 @@ export function createProxy(options) {
                   deny(res, { status: 502, title: '连不上本机的 dsh 服务', detail: '请稍后重试，或重启服务。' })
                 }
               }
-            )
+            ).catch((error) => {
+              // 成功回调 forward() 里的同步抛、或拒绝回调里的抛，都不该逃逸
+              log(`重试转发异常：${String(error?.message ?? error)}`)
+            })
             return
           }
-          res.writeHead(status, responseHeaders(response.headers))
-          // res 刚被客户端掐掉时 pipeline 会**同步抛** ERR_STREAM_UNABLE_TO_PIPE
-          //（"Cannot pipe to a closed or destroyed stream"）。这个异常从
-          // http.request 的回调里逃出去就是进程级 fatal（宿主直接退出），必须就地接住。
+          // res 刚被客户端掐掉时 writeHead / pipeline 都会**同步抛**
+          // ERR_STREAM_UNABLE_TO_PIPE（"Cannot pipe to a closed or destroyed stream"）。
+          // 这个异常从 http.request 的回调里逃出去就是进程级 fatal（宿主直接退出），
+          // 所以 writeHead 也要一并接住。
           try {
+            res.writeHead(status, responseHeaders(response.headers))
             pipeline(response, res, () => {})
           } catch (error) {
             response.destroy()
@@ -494,23 +501,29 @@ export function createProxy(options) {
     if (socket.destroyed) return
 
     const upstream = net.connect(upstreamPort, UPSTREAM_HOST, () => {
-      // 等 cookie 的那一下客户端可能已经走了：别在死 socket 上握手。
-      if (socket.destroyed || upstream.destroyed) {
+      try {
+        // 等 cookie 的那一下客户端可能已经走了：别在死 socket 上握手。
+        if (socket.destroyed || upstream.destroyed) {
+          upstream.destroy()
+          socket.destroy()
+          return
+        }
+        const headers = rewriteHeaders(req.headers, cookie, true)
+        const lines = [`GET ${String(req.url)} HTTP/1.1`]
+        for (const [name, value] of Object.entries(headers)) {
+          if (Array.isArray(value)) for (const item of value) lines.push(`${name}: ${item}`)
+          else if (value !== undefined) lines.push(`${name}: ${String(value)}`)
+        }
+        lines.push('', '')
+        upstream.write(lines.join('\r\n'))
+        if (head !== undefined && head.length > 0) upstream.write(head)
+        socket.pipe(upstream)
+        upstream.pipe(socket)
+      } catch (error) {
+        log(`WebSocket 握手转发中断：${String(error?.message ?? error)}`)
         upstream.destroy()
         socket.destroy()
-        return
       }
-      const headers = rewriteHeaders(req.headers, cookie, true)
-      const lines = [`GET ${String(req.url)} HTTP/1.1`]
-      for (const [name, value] of Object.entries(headers)) {
-        if (Array.isArray(value)) for (const item of value) lines.push(`${name}: ${item}`)
-        else if (value !== undefined) lines.push(`${name}: ${String(value)}`)
-      }
-      lines.push('', '')
-      upstream.write(lines.join('\r\n'))
-      if (head !== undefined && head.length > 0) upstream.write(head)
-      socket.pipe(upstream)
-      upstream.pipe(socket)
     })
 
     const teardown = () => {
@@ -538,19 +551,23 @@ export function createProxy(options) {
     return new Promise((resolve, reject) => {
       const instance = http.createServer((req, res) => {
         handleRequest(req, res).catch((error) => {
-          log(`处理请求出错：${String(error?.message ?? error)}`)
-          if (!res.headersSent) {
-            deny(res, { status: 502, title: '内部错误', detail: '代理处理这个请求时出错了。' })
-          } else {
-            res.destroy()
-          }
+          try {
+            log(`处理请求出错：${String(error?.message ?? error)}`)
+            if (!res.headersSent) {
+              deny(res, { status: 502, title: '内部错误', detail: '代理处理这个请求时出错了。' })
+            } else {
+              res.destroy()
+            }
+          } catch { /* 收尾路径不再抛 */ }
         })
       })
 
       instance.on('upgrade', (req, socket, head) => {
         handleUpgrade(req, socket, head).catch((error) => {
-          log(`处理 WebSocket 出错：${String(error?.message ?? error)}`)
-          socket.destroy()
+          try {
+            log(`处理 WebSocket 出错：${String(error?.message ?? error)}`)
+            socket.destroy()
+          } catch { /* 收尾路径不再抛 */ }
         })
       })
       instance.on('clientError', (_error, socket) => socket.destroy())

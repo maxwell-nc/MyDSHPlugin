@@ -180,9 +180,16 @@ async function loadHostFirst(specifiers) {
   return undefined
 }
 
-const { LocalBashExecutor } = await loadHost('@deepseek-ai/dsh-bash-local')
-const { SandboxBashExecutor } = await loadHost('@deepseek-ai/dsh-bash-sandbox')
-const { TerminalSessionService } = await loadHost('@deepseek-ai/dsh-terminal')
+// 防御式加载：这三个包是 dsh 运行时的执行器/终端服务。个别版本改名或缺失时，
+// **绝不能让顶层 await 的拒绝把宿主带崩** —— 走 loadHostFirst，拿不到就把基类
+// 退回 Object（extends 仍成立）、把 TerminalSessionService 留空并在使用时 guard，
+// 插件其余能力照常，执行器在缺失时按「无上游基类」降级，而不是以未处理拒绝退出。
+const _hostLocal = await loadHostFirst(['@deepseek-ai/dsh-bash-local'])
+const _hostSandbox = await loadHostFirst(['@deepseek-ai/dsh-bash-sandbox'])
+const _hostTerminal = await loadHostFirst(['@deepseek-ai/dsh-terminal'])
+const LocalBashExecutor = _hostLocal?.LocalBashExecutor ?? Object
+const SandboxBashExecutor = _hostSandbox?.SandboxBashExecutor ?? Object
+const TerminalSessionService = _hostTerminal?.TerminalSessionService
 // serviceForAgent：从 reflect 原始 store 里按 fiber 归属取 agent 挂载的隔离服务。
 // 极简模式的 terminals 在 agent 入局隔离的 persistent-shell 组里，agent 自己的
 // scope ctx 和 host 都看不见它，只有这条文档化的「从外部读 agent 隔离服务」路径
@@ -463,7 +470,15 @@ function installToolRewrite(ctx, options) {
 
   // 懒注入：dsh-tools 一定在，但这样即使某个部署没有 tools 行，执行器也照常工作。
   const inject = ctx?.inject?.bind(ctx)
-  if (typeof inject === 'function') inject(['tools'], (toolsCtx) => apply(toolsCtx.get('tools')))
+  if (typeof inject === 'function') {
+    inject(['tools'], (toolsCtx) => {
+      try {
+        apply(toolsCtx?.get?.('tools'))
+      } catch (error) {
+        console.error(`${TAG} 工具改写注入失败：%s`, error?.message ?? error)
+      }
+    })
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -517,6 +532,11 @@ const BASH_PTY_ARGS = ['--noprofile', '--norc', '-i']
  * agent 一份实例；打在**原型**上就能覆盖所有 realm —— 和工具改写是同一招。
  */
 function installTerminalRewrite(bashExe) {
+  // 拿不到 TerminalSessionService（上游改名/缺失）就跳过，别对 Object.prototype 动手
+  if (TerminalSessionService === null || typeof TerminalSessionService?.prototype !== 'object') {
+    console.error(`${TAG} 拿不到 TerminalSessionService，持久终端改写跳过（执行器部分不受影响）`)
+    return
+  }
   const proto = TerminalSessionService.prototype
   if (Object.hasOwn(proto, '__dshGitBashTerminal')) return
   const original = proto.registerBackend
@@ -544,7 +564,13 @@ function installTerminalRewrite(bashExe) {
         console.error(`${TAG} 持久终端改写失败：%s`, error?.message ?? error)
       }
     }
-    return original.call(this, backend)
+    try {
+      return original.call(this, backend)
+    } catch (error) {
+      // 注册后端失败不让它逃出去：记一行，降级成「该类型后端未挂载」
+      console.error(`${TAG} 注册持久终端后端失败：%s`, error?.message ?? error)
+      return undefined
+    }
   }
   Object.defineProperty(proto, '__dshGitBashTerminal', {
     value: true,
@@ -915,6 +941,7 @@ function createBashPersistentExecute(registrationCtx) {
         () => undefined
       )
     )
+    run.catch(() => {}) // 返回给调用方的 run 仍承载结果，但另挂一个兜底，绝不让拒绝逃出 execute
     return run
   }
 }

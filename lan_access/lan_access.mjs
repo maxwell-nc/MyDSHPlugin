@@ -305,7 +305,13 @@ export function apply(ctx) {
         path: INFO_PATH,
         methods: ['GET'],
         requestBody: 'buffered',
-        fetch: () => Promise.resolve(json(snapshot()))
+        fetch: async () => {
+          try {
+            return json(snapshot())
+          } catch (error) {
+            return Response.json({ ok: false, error: String(error?.message ?? error) }, { status: 500, headers: { 'cache-control': 'no-store' } })
+          }
+        }
       })
 
       // 面板上的「开启 / 关闭」：先落盘再起停，保证重启后状态一致
@@ -314,18 +320,23 @@ export function apply(ctx) {
         methods: ['POST'],
         requestBody: 'buffered',
         fetch: async (request) => {
-          let next = false
           try {
-            const body = await request.json()
-            next = body?.enabled === true
-          } catch {
-            // 体坏了就当关闭，别把开关打开
+            let next = false
+            try {
+              const body = await request.json()
+              next = body?.enabled === true
+            } catch {
+              // 体坏了就当关闭，别把开关打开
+            }
+            enabled = next
+            persist()
+            if (next) await startProxy()
+            else await stopProxy()
+            return json(snapshot())
+          } catch (error) {
+            console.error(`${TAG} 切换代理失败：${String(error?.message ?? error)}`)
+            return Response.json({ ok: false, error: String(error?.message ?? error) }, { status: 500, headers: { 'cache-control': 'no-store' } })
           }
-          enabled = next
-          persist()
-          if (next) await startProxy()
-          else await stopProxy()
-          return json(snapshot())
         }
       })
 
@@ -333,11 +344,15 @@ export function apply(ctx) {
         path: RESET_PATH,
         methods: ['POST'],
         requestBody: 'buffered',
-        fetch: () => {
-          accessKey = createAccessKey()
-          persist()
-          console.error(`${TAG} 访问码已重置，旧链接立即失效`)
-          return Promise.resolve(json(snapshot()))
+        fetch: async () => {
+          try {
+            accessKey = createAccessKey()
+            persist()
+            console.error(`${TAG} 访问码已重置，旧链接立即失效`)
+            return json(snapshot())
+          } catch (error) {
+            return Response.json({ ok: false, error: String(error?.message ?? error) }, { status: 500, headers: { 'cache-control': 'no-store' } })
+          }
         }
       })
     } catch (error) {
@@ -348,7 +363,7 @@ export function apply(ctx) {
     scoped.effect(
       () => () => {
         running = false
-        void proxy?.stop()
+        void proxy?.stop()?.catch(() => {})
       },
       'dsh-lan-access: stop proxy'
     )
@@ -365,7 +380,7 @@ export function apply(ctx) {
     EXIT_HOOKED = true
     process.on('exit', () => {
       try {
-        void proxy?.stop()
+        void proxy?.stop()?.catch(() => {})
       } catch {
         // 退出路径上不再抛
       }

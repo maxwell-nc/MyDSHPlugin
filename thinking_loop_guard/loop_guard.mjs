@@ -552,7 +552,10 @@ function fire(ctx, m, kind, detail) {
   if (depth < MAX_RETRY) {
     // 重跑链还有额度：分支重跑（异步任务，不阻塞流收尾）
     m.action = 'branched'
-    void branchRetry(ctx, m, kind, detail)
+    void branchRetry(ctx, m, kind, detail).catch((error) => {
+      // branchRetry 内部已全量 try/catch，这里再兜一手，绝不让异步任务以未处理拒绝逃出
+      console.error(TAG, '分支重跑任务异常:', reasonOf(error))
+    })
     return
   }
   // 重跑链已到上限：取消本轮（与用户点停止同一条路）

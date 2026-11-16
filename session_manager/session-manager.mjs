@@ -625,13 +625,20 @@ function createCore(ctx) {
   }
 
   function openInFileManager(target) {
+    let child
     if (process.platform === 'win32') {
-      spawn('explorer.exe', [target], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+      child = spawn('explorer.exe', [target], { detached: true, stdio: 'ignore', windowsHide: true })
     } else if (process.platform === 'darwin') {
-      spawn('open', [target], { detached: true, stdio: 'ignore' }).unref()
+      child = spawn('open', [target], { detached: true, stdio: 'ignore' })
     } else {
-      spawn('xdg-open', [target], { detached: true, stdio: 'ignore' }).unref()
+      child = spawn('xdg-open', [target], { detached: true, stdio: 'ignore' })
     }
+    // 启动失败（exe 缺失 / EACCES 等）会以 'error' 事件异步抛出；不挂监听会
+    // 变成未捕获异常逃逸出宿主机回调（此时外层 try/catch 早已返回，拦不住）。
+    child.on('error', (error) => {
+      console.warn(`${TAG} 打开文件管理器失败：${String(error?.message ?? error)}`)
+    })
+    child.unref()
   }
 
   return { readOverview, readTitles, deleteSessions, deleteWorkspace, openDirectory }
@@ -676,21 +683,25 @@ export function apply(ctx) {
 
   ctx.inject(['connection'], (scoped) => {
     const register = (path, methods, handler) => {
-      scoped.connection.fetch.register({
-        path,
-        methods,
-        requestBody: 'buffered',
-        fetch: async (request) => {
-          try {
-            const result = await handler(request)
-            return Response.json(result ?? {}, { headers: { 'cache-control': 'no-store' } })
-          } catch (error) {
-            const status = Number(error?.status) || 500
-            const message = String(error?.message ?? error)
-            return Response.json({ error: message }, { status, headers: { 'cache-control': 'no-store' } })
+      try {
+        scoped.connection.fetch.register({
+          path,
+          methods,
+          requestBody: 'buffered',
+          fetch: async (request) => {
+            try {
+              const result = await handler(request)
+              return Response.json(result ?? {}, { headers: { 'cache-control': 'no-store' } })
+            } catch (error) {
+              const status = Number(error?.status) || 500
+              const message = String(error?.message ?? error)
+              return Response.json({ error: message }, { status, headers: { 'cache-control': 'no-store' } })
+            }
           }
-        }
-      })
+        })
+      } catch (error) {
+        console.warn(`${TAG} 注册接口 ${path} 失败：${String(error?.message ?? error)}`)
+      }
     }
 
     // 全库清点：一次 payload 带所有工作区 + 所有会话（标题除外，见 titles）

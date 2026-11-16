@@ -282,9 +282,10 @@ async function perform(request) {
  */
 export function apply(ctx) {
   ctx.inject(['connection'], (scoped) => {
-    const conn = scoped.connection
+    try {
+      const conn = scoped.connection
 
-    conn.fetch.register({
+      conn.fetch.register({
       path: API_INFO,
       methods: ['GET'],
       // 必须显式 'buffered'：bridge 按「命中路由取 requestBody、缺省走流式」分派，
@@ -326,6 +327,9 @@ export function apply(ctx) {
     })
 
     console.error(`${TAG} 接口就绪：GET ${API_INFO} / POST ${API_ACT}`)
+    } catch (error) {
+      console.error(`${TAG} 注册接口失败：${String(error?.message ?? error)}`)
+    }
   })
 }
 

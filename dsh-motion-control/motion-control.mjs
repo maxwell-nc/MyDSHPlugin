@@ -149,21 +149,25 @@ export function apply(ctx) {
 
   ctx.inject(['connection'], (scoped) => {
     const register = (path, methods, handler) => {
-      scoped.connection.fetch.register({
-        path,
-        methods,
-        requestBody: 'buffered',
-        fetch: async (request) => {
-          try {
-            const result = await handler(request)
-            return Response.json(result ?? {}, { headers: { 'cache-control': 'no-store' } })
-          } catch (error) {
-            const status = Number(error?.status) || 500
-            const message = String(error?.message ?? error)
-            return Response.json({ error: message }, { status, headers: { 'cache-control': 'no-store' } })
-          }
-        },
-      })
+      try {
+        scoped.connection.fetch.register({
+          path,
+          methods,
+          requestBody: 'buffered',
+          fetch: async (request) => {
+            try {
+              const result = await handler(request)
+              return Response.json(result ?? {}, { headers: { 'cache-control': 'no-store' } })
+            } catch (error) {
+              const status = Number(error?.status) || 500
+              const message = String(error?.message ?? error)
+              return Response.json({ error: message }, { status, headers: { 'cache-control': 'no-store' } })
+            }
+          },
+        })
+      } catch (error) {
+        console.error(`${TAG} 注册 ${path} 失败：${String(error?.message ?? error)}`)
+      }
     }
 
     register(ROUTE_GET, ['GET'], async () => ({
