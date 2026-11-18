@@ -1,12 +1,13 @@
 {
   "name": "dsh-usage",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
-  "description": "dsh token 用量统计插件（host 半边 + Web 客户端半边）；含「规范模型名」与「合并徽章」两个展示开关（后者默认开，把 -TokenPlan / -Free / 构建号这类末尾标记并成一个模型），图例每行显示该模型自己的平均输出速度与平均首字延迟（TTFT）",
+  "description": "dsh token 用量统计插件（host 半边 + Web 客户端半边）；含「规范模型名」与「合并徽章」两个展示开关（后者默认开，把 -TokenPlan / -Free / 构建号这类末尾标记并成一个模型），图例每行显示该模型自己的平均输出速度与平均首字延迟（TTFT），并在消耗来源列表后新增 ctai 计费清单（只统计 ctai 前缀模型，按价目表算金额）",
   "scripts": {
     "test:model-merge": "node test-model-merge.mjs",
-    "test:timing": "node test-timing.mjs"
+    "test:timing": "node test-timing.mjs",
+    "test:ctai-cost": "node test-ctai-cost.mjs"
   },
   "exports": {
     ".": "./usage.mjs",

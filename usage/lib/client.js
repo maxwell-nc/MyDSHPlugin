@@ -72,6 +72,7 @@ window.__ModuleLoader__.load({
 			".dshu-path{font-family:ui-monospace,Consolas,'Courier New',monospace;color:var(--dsw-alias-label-tertiary,#8a93a8);word-break:break-all}" +
 			".dshu-icon{display:block}" +
 			".dshu-badge{font-size:11px;line-height:1;color:var(--dsw-alias-label-tertiary,#8a93a8);font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none}" +
+			".dshu-badgeAmt{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary,#1b2130)}" +
 			".dshu-list{margin-top:16px}" +
 			".dshu-listHead{display:flex;align-items:baseline;gap:8px;font-size:13px;font-weight:600}" +
 			".dshu-listCount{margin-left:auto;font-size:11px;font-weight:400;color:var(--dsw-alias-label-tertiary,#8a93a8)}" +
@@ -88,6 +89,22 @@ window.__ModuleLoader__.load({
 			".dshu-ltok{flex:none;min-width:64px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}" +
 			".dshu-pag{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px}" +
 			".dshu-pagInfo{font-size:11px;color:var(--dsw-alias-label-tertiary,#8a93a8)}" +
+			// ctai 费用模块：标题「CTAI 费用」+ 来源筛选按钮合并到一行 + 偏大的合计，下方堆叠柱状图。
+			".dshu-costHead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}" +
+			".dshu-costTitle{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary,#1b2130)}" +
+			".dshu-costFilters{display:flex;flex-wrap:wrap;gap:6px}" +
+			".dshu-costFilter{box-sizing:border-box;height:24px;padding:0 11px;border:1px solid var(--dsw-alias-border-l1,rgba(22,32,58,.18));border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#5b6478);font:inherit;font-size:11px;line-height:1;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums}" +
+			".dshu-costFilter:hover{border-color:#8fb6e8;color:#1c62b5}" +
+			".dshu-costFilter.is-on{background:#e8f2ff;border-color:#6cb6f5;color:#1c62b5}" +
+			".dshu-costTotal{margin-left:auto;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary,#1b2130)}" +
+			".dshu-costChart{position:relative;width:100%;height:200px;margin-top:14px}" +
+			".dshu-costBar{cursor:pointer}" +
+			".dshu-costBar:hover{filter:brightness(1.08) saturate(1.05)}" +
+			".dshu-costAxisLabel{font-size:10px;fill:var(--dsw-alias-label-tertiary,#8a93a8)}" +
+			".dshu-costLegend{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:10px;font-size:12px;color:var(--dsw-alias-label-secondary,#5b6478)}" +
+			".dshu-costLeg{display:inline-flex;align-items:center;gap:6px}" +
+			".dshu-costLegSwatch{flex:none;width:8px;height:8px;border-radius:2px}" +
+			".dshu-costLegName{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}" +
 			".dshu-warn{color:#b45309}" +
 			".dshu-ops{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:14px}" +
 			".dshu-switch{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}" +
@@ -199,6 +216,69 @@ window.__ModuleLoader__.load({
 		/** 消耗来源的颜色徽标；未列出的来源（如「未知模型」之外的自定义来源）落到默认灰。 */
 		const SRC_COLORS = { "对话": "#6cb6f5", "子代理": "#a892f0", "分支": "#f2949f", "解析图片": "#6ecf9e" };
 		const h = react.createElement;
+
+		/**
+		 * ctai 计费价目表（按模型名，**不含** `ctai_xxx/` 前缀）。
+		 *
+		 * 数据来自用户给的权威价目表（`价格.jpg`），单位「元 / 百万 token」：
+		 * `[输入, 输出, 缓存命中(cacheRead), 缓存写入(cacheWrite)]`。
+		 *
+		 * 关键口径（已在组内交叉验证并定稿，与终稿对账脚本 `ctai_final_calc.py` 一致）：
+		 *   - 只计算模型 id 以 `ctai` 开头的（形如 `ctai_my/...`，后续可能有 `ctai_xxx/...`）；
+		 *   - deepseek 系分峰谷（标准 2/8/0.04、优惠 1/4/0.02）：in/out 用**标准价**、
+		 *     缓存用**优惠价 0.02** —— 账本（usage.json）只有「天 × 模型」桶、没有小时粒度，
+		 *     无法切峰谷，故缓存按优惠价平算（终稿月度合计 251.62 vs 真实账单 254.55，
+		 *     差仅 ~1%，见组内核对）；
+		 *   - **glm-5.3-flash 是单一价** 0.8/2.8/0.23，不分峰谷；
+		 *   - `cacheWrite` 当前无价目，按 0 计。
+		 */
+		const CTAI_PRICE = {
+			"deepseek-v4.1-flash": [2, 8, 0.02, 0],
+			"deepseek-v4.1-flash-1017": [2, 8, 0.02, 0],
+			"glm-5.3-flash": [0.8, 2.8, 0.23, 0],
+			"glm-5.3": [8, 28, 2, 0],
+			"kimi-k3.1-pro": [13, 68, 1.3, 0],
+			"qwen3.8-flash": [0.8, 2.7, 0.1, 0],
+			"deepseek-v4-flash-0817": [3, 9, 0.05, 0],
+			"deepseek-v4-pro-0817": [9, 27, 0.15, 0]
+		};
+
+		/**
+		 * 模型 id（如 `ctai_my/deepseek-v4.1-flash-1017`）是不是计费范围：`ctai` 前缀开头
+		 * （`ctai_my`，后续可能有 `ctai_xxx`）。前缀之后是模型名（`/` 后一段）；前缀本身
+		 * （`ctai_my` / `ctai_xxx`）作为「来源」展示。
+		 *
+		 * @returns `{ prefix, model }`，前缀取 `/` 前一段，模型名取其后一段；不符合返回 null。
+		 */
+		function splitCtai(id) {
+			if (typeof id !== "string" || id.slice(0, 4).toLowerCase() !== "ctai") return null;
+			const slash = id.indexOf("/") >= 0 ? id.indexOf("/") : id.indexOf("\\");
+			if (slash < 0) return null;
+			const prefix = id.slice(0, slash);
+			const model = id.slice(slash + 1);
+			return { prefix, model };
+		}
+
+		/** 一个 ctai 模型桶按价目表算出的金额（元）；未定价返回 null。 */
+		function ctaiCost(model, priceList, bucket) {
+			const [inPrice, outPrice, cachePrice, writePrice] = priceList;
+			return (
+				(Number(bucket?.input) || 0) / 1e6 * inPrice +
+				(Number(bucket?.cacheRead) || 0) / 1e6 * cachePrice +
+				(Number(bucket?.output) || 0) / 1e6 * outPrice +
+				(Number(bucket?.cacheWrite) || 0) / 1e6 * (writePrice || 0)
+			);
+		}
+
+		/** 金额显示：`¥12.34`，不足整数也不丢分。 */
+		function formatYuan(amount) {
+			return "¥" + (Math.round(amount * 100) / 100).toFixed(2);
+		}
+
+		/** 金额显示（整数，四舍五入）：`¥252`。ctai 费用对外只展示整数，不加小数。 */
+		function formatYuanInt(amount) {
+			return "¥" + Math.round(Number(amount) || 0);
+		}
 
 		function measure(tokens) {
 			const value = Number(tokens) || 0;
@@ -471,9 +551,39 @@ window.__ModuleLoader__.load({
 				};
 			}, []);
 
-			const today = data?.today;
+			const today = data?.today || dateKey(new Date());
 			const todayTokens = data?.days?.find((day) => day.date === today)?.total ?? 0;
-			const badge = data === null ? "" : formatAmount(todayTokens);
+			// 某一天的 ctai 费用（days 记录里含 `models` 原始键，按价目表计价）。
+			const dayCost = (day) => {
+				let sum = 0;
+				for (const raw of Object.keys(day?.models || {})) {
+					const parts = splitCtai(raw);
+					if (!parts) continue;
+					const price = CTAI_PRICE[parts.model];
+					if (!price) continue;
+					sum += ctaiCost(parts.model, price, day.models[raw]);
+				}
+				return sum;
+			};
+			// 角标：今天 token 数 + **当月 ctai 总金额**（外界角标，金额取整数、放大、与 token
+			// 同款大字号加粗）。总量（当月金额）取整后为 0、或当天 token 为 0 时，都不显示角标。
+			let badge = null;
+			if (data && todayTokens > 0) {
+				const days = data.days ?? [];
+				const monthStart = today.slice(0, 7) + "-01";
+				const amount = Math.round(
+					days
+						.filter((day) => day.date >= monthStart && day.date <= today)
+						.reduce((sum, day) => sum + dayCost(day), 0)
+				);
+				if (amount > 0) {
+					badge = h(
+						"span",
+						{ className: "dshu-badgeAmt" },
+						formatAmount(todayTokens) + " · " + formatYuanInt(amount)
+					);
+				}
+			}
 			const outline = { stroke: "currentColor", fill: "none", strokeWidth: 1.2, strokeLinecap: "round" };
 
 			return h(
@@ -487,7 +597,7 @@ window.__ModuleLoader__.load({
 					h("path", { d: "M12.8 12.8V9.4", ...outline }),
 					h("path", { d: "M2 13.6H14", ...outline })
 				),
-				wide && badge.length > 0
+				wide && badge !== null
 					? h(
 							"span",
 							{
@@ -923,6 +1033,271 @@ window.__ModuleLoader__.load({
 			);
 		}
 
+		/**
+		 * ctai 计费清单（新增模块，列在「最近消耗来源」后面）：顶部来源筛选按钮 +
+		 * **堆叠柱状图**。每天一柱，柱内按模型着色堆叠，柱高 = 当日 ctai 费用；
+		 * hover 一柱弹出该日各模型金额气包（复用上方图表的气包样式）。
+		 *
+		 * 只统计模型 id 以 `ctai` 开头的（形如 `ctai_my/...`，后续可能有 `ctai_xxx/...`），
+		 * 从「天 × 模型」桶读 in/out/cacheRead/cacheWrite 按价目表计价。用与主面板相同的
+		 * 所选区间聚合，跟着日期范围选择一起变（默认当月）。
+		 */
+		function UsageCostTip({ tip }) {
+			// 与 UsageTip 同一套悬浮定位：相对视口的绝对坐标、水平钳制、浮在 target 上方。
+			const [box, setBox] = react.useState(null);
+			const ref = react.useRef(null);
+			react.useLayoutEffect(() => {
+				if (tip === null) {
+					setBox(null);
+					return;
+				}
+				const el = ref.current;
+				if (!el) return;
+				const width = el.offsetWidth;
+				const height = el.offsetHeight;
+				const margin = 8;
+				let left = tip.x - width / 2;
+				let top = tip.y - height - 10;
+				left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+				top = Math.max(margin, top);
+				setBox({ left, top });
+			}, [tip]);
+			if (tip === null) return null;
+			return react_dom.createPortal(
+				h(
+					"div",
+					{
+						ref,
+						className: "dshu-tip",
+						style: box ? { left: box.left, top: box.top, transform: "none" } : { left: tip.x, top: tip.y }
+					},
+					h(
+						"div",
+						{ className: "dshu-tipHead" },
+						tip.date,
+						h("span", { className: "dshu-tipHeadTotal" }, "合计 " + formatYuan(tip.total))
+					),
+					tip.rows.length > 0
+						? h(
+								"div",
+								{ className: "dshu-tipList" },
+								tip.rows.map((row) =>
+									h(
+										react.Fragment,
+										{ key: row.label },
+										h("span", { className: "dshu-tipSwatch", style: { background: row.color } }),
+										h("span", { className: "dshu-tipName", title: row.label }, row.label),
+										h("span", { className: "dshu-tipNum" }, formatYuan(row.amount)),
+										h("span", { className: "dshu-tipPct" }, formatShare(row.amount, tip.total))
+									)
+								)
+						  )
+						: h("div", { className: "dshu-tipDim" }, "当日没有 ctai 费用")
+				),
+				document.body
+			);
+		}
+
+		function UsageCostList({ recorded, keys }) {
+			// rows: { prefix, date, model, amount } —— 只收区间内以 ctai 开头、有价目表的行。
+			const rows = [];
+			let grandTotal = 0;
+			keys.forEach((date) => {
+				const day = recorded.get(date);
+				if (!day) return;
+				for (const raw of Object.keys(day.models || {})) {
+					const parts = splitCtai(raw);
+					if (!parts) continue;
+					const price = CTAI_PRICE[parts.model];
+					if (!price) continue;
+					const amount = ctaiCost(parts.model, price, day.models[raw]);
+					if (amount <= 0) continue;
+					rows.push({ prefix: parts.prefix, date, model: parts.model, amount });
+					grandTotal += amount;
+				}
+			});
+
+			// 顶部来源筛选按钮："" = 全部，其余按前缀（ctai_my / 后续 ctai_xxx）过滤。
+			const prefixes = [...new Set(rows.map((row) => row.prefix))].sort();
+			const [active, setActive] = react.useState("");
+			const filtered = active ? rows.filter((row) => row.prefix === active) : rows;
+			const shownTotal = filtered.reduce((sum, row) => sum + row.amount, 0);
+
+			// 模型 → 颜色：沿用主面板调色板，按首现顺序分配（顺序稳定，柱内堆叠/图例一致）。
+			const modelNames = [...new Set(filtered.map((row) => row.model))];
+			const colorOf = new Map(modelNames.map((name, index) => [name, PALETTE[index % PALETTE.length]]));
+
+			// 按天聚合：date -> [{ model, amount }]（升序铺满横轴）。
+			const dayMap = new Map();
+			filtered.forEach((row) => {
+				if (!dayMap.has(row.date)) dayMap.set(row.date, []);
+				dayMap.get(row.date).push({ model: row.model, amount: row.amount });
+			});
+			const days = [...dayMap.keys()].sort();
+			const dayTotals = days.map((day) => dayMap.get(day).reduce((sum, item) => sum + item.amount, 0));
+			const maxTotal = Math.max(1, ...dayTotals);
+
+			// 画布几何：与上方折线图同一套 viewBox，柱宽随天数自适应。
+			const W = 640;
+			const H = 210;
+			const PAD_L = 8;
+			const PAD_R = 8;
+			const PAD_T = 12;
+			const PAD_B = 26;
+			const plotW = W - PAD_L - PAD_R;
+			const plotH = H - PAD_T - PAD_B;
+			const n = days.length;
+			const stepX = n > 0 ? plotW / n : plotW;
+			const barW = Math.max(3, Math.min(26, stepX * 0.55));
+			const xOf = (index) => PAD_L + stepX * index + stepX / 2;
+			const grid = [0, 0.25, 0.5, 0.75, 1].map((frac) => ({ frac, y: PAD_T + plotH - frac * plotH }));
+
+			// 每日堆叠段：自下而上，金额大的在下（视觉稳定），每格都拿到自己的颜色。
+			const bars = days.map((day, index) => {
+				const items = dayMap.get(day).slice().sort((a, b) => b.amount - a.amount);
+				let cum = 0;
+				const segments = items.map((item) => {
+					const fromY = PAD_T + plotH - (cum / maxTotal) * plotH;
+					const toY = PAD_T + plotH - ((cum + item.amount) / maxTotal) * plotH;
+					cum += item.amount;
+					return { model: item.model, amount: item.amount, color: colorOf.get(item.model), y: toY, height: fromY - toY };
+				});
+				return {
+					date: day,
+					total: dayTotals[index],
+					x: xOf(index),
+					y: PAD_T + plotH - (dayTotals[index] / maxTotal) * plotH,
+					height: (dayTotals[index] / maxTotal) * plotH,
+					segments
+				};
+			});
+
+			const [tip, setTip] = react.useState(null);
+			const showTip = (event, bar) => {
+				const rect = event.currentTarget.getBoundingClientRect();
+				setTip({
+					x: rect.left + rect.width / 2,
+					y: rect.top,
+					date: bar.date,
+					total: bar.total,
+					rows: bar.segments.map((seg) => ({ label: seg.model, amount: seg.amount, color: seg.color }))
+				});
+			};
+
+			// 横轴日期标签：默认条形较多，隔几个标一个「日」避免拥挤（完整日期在 hover 气包）。
+			const labelEvery = Math.max(1, Math.round(n / 20));
+
+			return h(
+				"div",
+				{ className: "dshu-list" },
+				h(
+					"div",
+					{ className: "dshu-listHead dshu-costHead" },
+					h("span", { className: "dshu-costTitle" }, "CTAI 费用"),
+					h(
+						"div",
+						{ className: "dshu-costFilters" },
+						h(
+							"button",
+							{ type: "button", className: "dshu-costFilter" + (active === "" ? " is-on" : ""), onClick: () => setActive("") },
+							"全部"
+						),
+						prefixes.map((prefix) =>
+							h(
+								"button",
+								{
+									type: "button",
+									key: prefix,
+									className: "dshu-costFilter" + (active === prefix ? " is-on" : ""),
+									onClick: () => setActive(active === prefix ? "" : prefix)
+								},
+								prefix
+							)
+						)
+					),
+					h(
+						"span",
+						{ className: "dshu-costTotal" },
+						(active ? "已选 " + active + " · " : "") + "合计 " + formatYuan(shownTotal)
+					)
+				),
+				rows.length === 0
+					? h("div", { className: "dshu-empty" }, "所选区间还没有 ctai（以 ctai 开头）的计费记录。")
+					: h(
+							react.Fragment,
+							null,
+							h(
+								"div",
+								{ className: "dshu-costChart" },
+								h(
+									"svg",
+									{ viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none", style: { width: "100%", height: "100%", display: "block" } },
+									grid.map((line) =>
+										h("line", {
+											key: String(line.frac),
+											x1: PAD_L,
+											y1: line.y,
+											x2: W - PAD_R,
+											y2: line.y,
+											className: line.frac === 0 ? "dshu-lineAxis" : "dshu-lineGrid"
+										})
+									),
+									bars.map((bar) =>
+										h(
+											"g",
+											{
+												key: bar.date,
+												className: "dshu-costBar",
+												onMouseEnter: (event) => showTip(event, bar),
+												onMouseMove: (event) => showTip(event, bar),
+												onMouseLeave: () => setTip(null)
+											},
+											bar.segments.map((seg) =>
+												h("rect", {
+													key: seg.model,
+													x: bar.x - barW / 2,
+													y: seg.y,
+													width: barW,
+													height: seg.height,
+													fill: seg.color,
+													rx: 1
+												})
+											)
+										)
+									),
+									days.map((date, index) =>
+										index % labelEvery === 0 || index === n - 1
+											? h(
+													"text",
+													{ key: "x" + index, className: "dshu-costAxisLabel", x: xOf(index), y: H - 9, textAnchor: "middle" },
+													String(Number(date.slice(8, 10)))
+											  )
+											: null
+									)
+								)
+							),
+							h(
+								"div",
+								{ className: "dshu-costLegend" },
+								modelNames.map((name) =>
+									h(
+										"span",
+										{ key: name, className: "dshu-costLeg", title: name },
+										h("span", { className: "dshu-costLegSwatch", style: { background: colorOf.get(name) } }),
+										h("span", { className: "dshu-costLegName" }, name)
+									)
+								)
+							)
+					  ),
+				h(
+					"div",
+					{ className: "dshu-foot" },
+					"区间合计 " + formatYuan(grandTotal) + "（默认当月）；只统计以 ctai 开头的模型；deepseek 系缓存按优惠价 0.02 平算（账本无小时粒度），glm 系单一价。"
+				),
+				h(UsageCostTip, { tip })
+			);
+		}
+
 		/** 面板数据：读快照 + 重读。 */
 		function useUsageData() {
 			const [state, setState] = react.useState({ phase: "loading", data: null, error: "" });
@@ -1355,7 +1730,8 @@ window.__ModuleLoader__.load({
 								)
 							: null
 					),
-					h(UsageSourcesList, { sources: data?.sources ?? [], hidePrefix })
+					h(UsageSourcesList, { sources: data?.sources ?? [], hidePrefix }),
+					h(UsageCostList, { recorded, keys })
 				)
 			);
 		}
@@ -1931,7 +2307,7 @@ window.__ModuleLoader__.load({
 			contextReadings
 		};
 		/** 同一套纯函数自测口子：模型名规范化 / 徽章合并 / 「天 × 模型」聚合（test-model-merge.mjs）。 */
-		exports.__usage = { buildView, displayKey, badgeBase };
+		exports.__usage = { buildView, displayKey, badgeBase, splitCtai, ctaiCost, formatYuan, CTAI_PRICE };
 		/** 每模型平均读数与「其他」行求和的口子（test-timing.mjs 验口径）。 */
 		exports.__timing = { timingReadings, sumTiming };
 		return module.exports;
